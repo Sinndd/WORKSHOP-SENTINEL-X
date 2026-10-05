@@ -120,3 +120,61 @@ details summary { cursor: pointer; color: var(--text-secondary); margin: 8px 0; 
 .error { border: 1px solid var(--critical); color: var(--text-primary); background: var(--surface-1); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
 .gate { max-width: 420px; margin: 12vh auto; }
 .gate input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--page); margin: 8px 0 12px; }
+
+/* --- STYLES TACTIQUES CYBER-COMMANDEMENT SENTINEL-X --- */
+.brand-group { display: flex; align-items: center; gap: 10px; }
+.brand-badge { background: #d03b3b; color: #fff; font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 4px; letter-spacing: 1px; }
+.user-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--wash); border: 1px solid var(--border); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+.btn-secondary { background: transparent; border-color: var(--border); }
+.btn-secondary:hover { background: rgba(208, 59, 59, 0.1); border-color: #d03b3b; color: #d03b3b; }
+
+.alert-banner { padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+.success-banner { background: rgba(12, 163, 12, 0.15); border: 1px solid #0ca30c; color: #0ca30c; }
+.error-banner { background: rgba(208, 59, 59, 0.15); border: 1px solid #d03b3b; color: #d03b3b; }
+
+/* Login Gate Tactique */
+.login-wrapper { display: flex; justify-content: center; align-items: center; min-height: 80vh; padding: 20px; }
+.login-card { max-width: 440px; width: 100%; border: 1px solid rgba(42, 120, 214, 0.3); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+.login-header { text-align: center; margin-bottom: 20px; }
+.corp-tag { display: inline-block; font-size: 10px; font-weight: 700; color: #2a78d6; letter-spacing: 1.5px; margin-bottom: 6px; }
+.field-group { margin-bottom: 14px; }
+.field-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; }
+.field-group input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--page); box-sizing: border-box; }
+.field-group input:focus { outline: none; border-color: #2a78d6; }
+.btn-primary { background: #2a78d6; color: #fff; border: none; font-weight: 600; padding: 10px; }
+.btn-primary:hover { background: #1e5eb0; }
+.btn-block { width: 100%; }
+.login-toggle { text-align: center; margin-top: 14px; }
+.link-button { background: none; border: none; color: #2a78d6; font-size: 12px; cursor: pointer; text-decoration: underline; }
+
+/* Panneau de Contrôle Réactif */
+.panels-split { grid-template-columns: repeat(auto-fit, minmax(min(100%, 540px), 1fr)); }
+.action-panel { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.action-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--page); border: 1px solid var(--border); border-radius: 8px; gap: 12px; }
+.action-info { display: flex; flex-direction: column; gap: 2px; }
+.action-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-action { background: var(--surface-1); border: 1px solid var(--border); font-size: 12px; font-weight: 600; padding: 6px 12px; }
+.btn-action:hover { background: #2a78d6; color: #fff; border-color: #2a78d6; }
+.btn-danger { background: rgba(208, 59, 59, 0.1); border: 1px solid #d03b3b; color: #d03b3b; font-size: 12px; font-weight: 600; padding: 6px 12px; }
+.btn-danger:hover { background: #d03b3b; color: #fff; }
+.emergency-row { border-color: rgba(208, 59, 59, 0.4); background: rgba(208, 59, 59, 0.04); }
+.danger-text { color: #d03b3b; }
+.btn-emergency { background: #d03b3b; color: #fff; border: none; font-size: 13px; font-weight: 800; padding: 8px 16px; letter-spacing: 0.5px; border-radius: 6px; box-shadow: 0 4px 12px rgba(208, 59, 59, 0.3); }
+.btn-emergency:hover { background: #ad2727; transform: translateY(-1px); }
+
+/* Sommaire des Actionneurs */
+.actuators-status-summary { display: flex; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--grid); padding-top: 12px; }
+.actuator-chip { display: flex; align-items: center; gap: 6px; background: var(--page); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+.chip-name { color: var(--text-secondary); }
+.chip-badge { font-weight: 600; }
+.chip-on { color: #0ca30c; }
+.chip-off { color: var(--text-muted); }
+
+/* Cadre Vidéo Webcam */
+.camera-feed-box { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #0c0e12; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); }
+.camera-stream-img { width: 100%; height: 100%; object-fit: contain; }
+.camera-overlay { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+.cam-badge { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; border: 1px solid rgba(255, 255, 255, 0.1); }
+.live-dot { color: #d03b3b; }
+.cam-node { font-size: 11px; color: rgba(255, 255, 255, 0.7); background: rgba(0,0,0,0.6); padding: 3px 6px; border-radius: 4px; }
+.btn-sm { font-size: 11px; padding: 3px 8px; }

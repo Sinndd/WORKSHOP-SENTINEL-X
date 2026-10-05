@@ -71,6 +71,7 @@ inconnus sont ignorés.
 | GET | `/health` | — | vivacité (healthcheck Docker) |
 | GET | `/ready` | — | base de données + broker MQTT joignables |
 | GET | `/dashboard/` | — (données : opérateur) | tableau de bord React |
+| **POST** | **`/api/v1/auth/login`** | — | **connexion opérateur (User / Mot de passe)** |
 | **POST** | **`/api/v1/alerts`** | appareil ou opérateur | **créer une alerte (ESP32)** |
 | GET | `/api/v1/alerts` | opérateur | lister les alertes (filtres) |
 | POST | `/api/v1/alerts/{id}/ack` | opérateur | acquitter une alerte |
@@ -84,7 +85,12 @@ inconnus sont ignorés.
 | PUT | `/api/v1/badges/{card_uid}` | opérateur | créer / modifier un badge |
 | DELETE | `/api/v1/badges/{card_uid}` | opérateur | révoquer un badge |
 | **POST** | **`/api/v1/commands`** | opérateur | **commande moteurs / alarme → ESP32** |
+| POST | `/api/v1/actuators/airlock` | opérateur | raccourci ouverture / fermeture du sas |
+| POST | `/api/v1/actuators/alarm` | opérateur | raccourci déclenchement / arrêt alarme |
+| POST | `/api/v1/actuators/emergency_stop` | opérateur | raccourci coupure d'urgence de tous les moteurs |
 | GET | `/api/v1/commands` | opérateur | historique des commandes envoyées |
+| POST | `/api/v1/vision/snapshot` | opérateur | téléversement snapshot caméra par le script IA |
+| GET | `/api/v1/vision/snapshot` | opérateur | flux/image JPEG directe pour le dashboard |
 | GET | `/api/v1/vision/events` | opérateur | détections de la caméra (IA) |
 
 ---

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { download, getJson, postJson, Unauthorized } from "./api";
+import { download, getJson, loginApi, postJson, Unauthorized } from "./api";
 import { BarList, Card, StatTile, StatusBadge, type Status } from "./components/ui";
 import { LineChart, type Point } from "./components/LineChart";
 import { ago, dateTime, num } from "./format";
@@ -14,9 +14,10 @@ const RANGES = [
   { id: "7d", label: "7 jours", ms: 7 * 24 * 3600_000 },
 ] as const;
 type RangeId = (typeof RANGES)[number]["id"];
-const REFRESH_MS = 10_000;
-const ONLINE_WITHIN_MS = 15_000;   // télémétrie toutes les 2 s : hors ligne au-delà de 15 s sans message
+const REFRESH_MS = 5_000;
+const ONLINE_WITHIN_MS = 15_000;
 const TOKEN_KEY = "sentinel.apiToken";
+const USER_KEY = "sentinel.apiUser";
 
 const EVENT_LABELS: Record<string, string> = {
   INTRUSION_DETECTED: "Intrusion",
@@ -49,17 +50,23 @@ interface Data {
 function readToken(): string {
   try { return sessionStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; }
 }
+function readUser(): string {
+  try { return sessionStorage.getItem(USER_KEY) ?? "Opérateur"; } catch { return "Opérateur"; }
+}
 
 export default function App() {
   const [token, setToken] = useState(readToken);
+  const [user, setUser] = useState(readUser);
   const [range, setRange] = useState<RangeId>("1h");
   const [auto, setAuto] = useState(true);
   const [unackOnly, setUnackOnly] = useState(false);
   const [data, setData] = useState<Data | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [hoverT, setHoverT] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [camRefreshKey, setCamRefreshKey] = useState(Date.now());
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -83,13 +90,17 @@ export default function App() {
       });
       setError(null);
       setNow(Date.now());
+      setCamRefreshKey(Date.now());
     } catch (e) {
       if (e instanceof Unauthorized) {
-        try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* stockage indisponible */ }
+        try {
+          sessionStorage.removeItem(TOKEN_KEY);
+          sessionStorage.removeItem(USER_KEY);
+        } catch { }
         setToken("");
-        setError("Jeton refusé : saisir API_TOKEN (fichier .env du serveur).");
+        setError("Session expirée : veuillez vous reconnecter.");
       } else {
-        setError(`Chargement impossible : ${(e as Error).message}`);   // on garde l'affichage précédent
+        setError(`Chargement impossible : ${(e as Error).message}`);
       }
     } finally {
       setLoading(false);
@@ -103,16 +114,61 @@ export default function App() {
     return () => clearInterval(id);
   }, [auto, load]);
 
-  if (!token) return <TokenGate error={error} onSubmit={(t) => {
-    try { sessionStorage.setItem(TOKEN_KEY, t); } catch { /* stockage indisponible : jeton gardé en mémoire */ }
+  const handleLoginSuccess = (newToken: string, newUsername: string) => {
+    try {
+      sessionStorage.setItem(TOKEN_KEY, newToken);
+      sessionStorage.setItem(USER_KEY, newUsername);
+    } catch { }
+    setToken(newToken);
+    setUser(newUsername);
     setError(null);
-    setToken(t);
-  }} />;
+  };
+
+  const handleLogout = () => {
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(USER_KEY);
+    } catch { }
+    setToken("");
+    setUser("Opérateur");
+  };
+
+  if (!token) {
+    return <LoginGate error={error} onLogin={handleLoginSuccess} />;
+  }
 
   const acknowledge = async (id: number) => {
     try { await postJson(`/api/v1/alerts/${id}/ack`, token); await load(); }
     catch (e) { setError(`Acquittement impossible : ${(e as Error).message}`); }
   };
+
+  const triggerAirlock = async (state: boolean) => {
+    try {
+      await postJson("/api/v1/actuators/airlock", token, { state, duration_ms: 3000 });
+      setActionSuccess(`Commande Sas ${state ? "OUVERTURE" : "FERMETURE"} transmise`);
+      setTimeout(() => setActionSuccess(null), 4000);
+      await load();
+    } catch (e) { setError(`Erreur Sas : ${(e as Error).message}`); }
+  };
+
+  const triggerAlarm = async (state: boolean) => {
+    try {
+      await postJson("/api/v1/actuators/alarm", token, { state, color: "RED", sound: "SIREN_ALERT" });
+      setActionSuccess(`Alarme ${state ? "ACTIVÉE" : "DÉSACTIVÉE"}`);
+      setTimeout(() => setActionSuccess(null), 4000);
+      await load();
+    } catch (e) { setError(`Erreur Alarme : ${(e as Error).message}`); }
+  };
+
+  const triggerEmergencyStop = async () => {
+    try {
+      await postJson("/api/v1/actuators/emergency_stop", token);
+      setActionSuccess("🚨 ARRÊT D'URGENCE GÉNÉRAL ACTIVÉ");
+      setTimeout(() => setActionSuccess(null), 5000);
+      await load();
+    } catch (e) { setError(`Erreur Arrêt Urgence : ${(e as Error).message}`); }
+  };
+
   const exportCsv = async () => {
     const rangeMs = RANGES.find((r) => r.id === range)!.ms;
     const since = new Date(Date.now() - rangeMs).toISOString();
@@ -125,14 +181,24 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <h1>SENTINEL-X — Supervision</h1>
+        <div className="brand-group">
+          <span className="brand-badge">AETHERCORP</span>
+          <h1>SENTINEL-X — Centre de Supervision</h1>
+        </div>
         <NodeStatus device={data?.device ?? null} now={now} />
         <span className="spacer" />
-        <span className="meta">{data ? `Mis à jour ${new Date(now).toLocaleTimeString("fr-FR")}` : "Chargement…"}</span>
-        <button className="btn" onClick={() => { try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* */ } setToken(""); }}>
-          Changer de jeton
+        <div className="user-badge">
+          <span className="user-icon">👤</span>
+          <span className="user-name">{user}</span>
+        </div>
+        <span className="meta">{data ? `MàJ ${new Date(now).toLocaleTimeString("fr-FR")}` : "Chargement…"}</span>
+        <button className="btn btn-secondary" onClick={handleLogout}>
+          Déconnexion
         </button>
       </header>
+
+      {actionSuccess && <div className="alert-banner success-banner" role="status">{actionSuccess}</div>}
+      {error && <div className="alert-banner error-banner" role="alert">{error}</div>}
 
       <div className="filters" role="toolbar" aria-label="Filtres">
         <div className="segmented" role="group" aria-label="Période">
@@ -140,31 +206,139 @@ export default function App() {
             <button key={r.id} aria-pressed={range === r.id} onClick={() => setRange(r.id)}>{r.label}</button>
           ))}
         </div>
-        <label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-          Actualisation auto (10 s)</label>
+        <label className="check">
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+          Flux temps réel (5s)
+        </label>
         <button className="btn" onClick={load} disabled={loading}>Actualiser</button>
-        <button className="btn" onClick={exportCsv}>Exporter CSV (brut)</button>
+        <button className="btn" onClick={exportCsv}>Export CSV</button>
       </div>
 
-      {error && <div className="error" role="alert">{error}</div>}
-      {data && <Dashboard data={data} now={now} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
-        unackOnly={unackOnly} setUnackOnly={setUnackOnly} onAck={acknowledge} />}
+      {data && (
+        <Dashboard
+          data={data}
+          now={now}
+          loading={loading}
+          hoverT={hoverT}
+          setHoverT={setHoverT}
+          unackOnly={unackOnly}
+          setUnackOnly={setUnackOnly}
+          onAck={acknowledge}
+          onAirlock={triggerAirlock}
+          onAlarm={triggerAlarm}
+          onEmergencyStop={triggerEmergencyStop}
+          camRefreshKey={camRefreshKey}
+        />
+      )}
     </div>
   );
 }
 
-function TokenGate({ error, onSubmit }: { error: string | null; onSubmit: (t: string) => void }) {
-  const [value, setValue] = useState("");
-  const submit = (e: FormEvent) => { e.preventDefault(); if (value.trim()) onSubmit(value.trim()); };
+function LoginGate({ error, onLogin }: { error: string | null; onLogin: (token: string, user: string) => void }) {
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [useTokenDirect, setUseTokenDirect] = useState(false);
+  const [directToken, setDirectToken] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loginErr, setLoginErr] = useState<string | null>(error);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoginErr(null);
+
+    if (useTokenDirect) {
+      if (directToken.trim()) {
+        onLogin(directToken.trim(), "Opérateur Token");
+      }
+      return;
+    }
+
+    if (!username.trim() || !password.trim()) {
+      setLoginErr("Veuillez renseigner votre identifiant et votre mot de passe.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await loginApi(username.trim(), password.trim());
+      onLogin(res.token, res.username || username.trim());
+    } catch (err) {
+      setLoginErr((err as Error).message || "Identifiants invalides");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <form className="card gate" onSubmit={submit}>
-      <h2>SENTINEL-X — Supervision</h2>
-      <p className="sub">Jeton opérateur <code>API_TOKEN</code> (fichier <code>.env</code> du serveur). Conservé pour cet onglet uniquement.</p>
-      {error && <div className="error" role="alert">{error}</div>}
-      <label htmlFor="token">Jeton</label>
-      <input id="token" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
-      <button className="btn" type="submit">Se connecter</button>
-    </form>
+    <div className="login-wrapper">
+      <form className="card gate login-card" onSubmit={handleSubmit}>
+        <div className="login-header">
+          <span className="corp-tag">AETHERCORP INDUSTRIAL SOLUTIONS</span>
+          <h2>SENTINEL-X — TERMINAL TACTIQUE</h2>
+          <p className="sub">Accès sécurisé au centre de commandement local.</p>
+        </div>
+
+        {loginErr && <div className="alert-banner error-banner" role="alert">{loginErr}</div>}
+
+        {!useTokenDirect ? (
+          <>
+            <div className="field-group">
+              <label htmlFor="login-user">Identifiant Opérateur</label>
+              <input
+                id="login-user"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="ex: admin"
+                autoFocus
+                required
+              />
+            </div>
+
+            <div className="field-group">
+              <label htmlFor="login-pass">Mot de Passe</label>
+              <input
+                id="login-pass"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+              />
+            </div>
+          </>
+        ) : (
+          <div className="field-group">
+            <label htmlFor="login-token">Jeton Secret API_TOKEN</label>
+            <input
+              id="login-token"
+              type="password"
+              autoComplete="off"
+              value={directToken}
+              onChange={(e) => setDirectToken(e.target.value)}
+              placeholder="Coller la clé API..."
+              required
+            />
+          </div>
+        )}
+
+        <button className="btn btn-primary btn-block" type="submit" disabled={loading}>
+          {loading ? "Vérification…" : "Connexion au Système"}
+        </button>
+
+        <div className="login-toggle">
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => { setUseTokenDirect(!useTokenDirect); setLoginErr(null); }}
+          >
+            {useTokenDirect ? "← Revenir à la connexion identifiant/mot de passe" : "Utiliser un jeton API direct"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -173,7 +347,7 @@ function NodeStatus({ device, now }: { device: Device | null; now: number }) {
   const online = device.last_seen != null && now - Date.parse(device.last_seen) < ONLINE_WITHIN_MS;
   return (
     <StatusBadge status={online ? "good" : "critical"}>
-      {device.node_id} · {online ? "En ligne" : `Hors ligne (dernier message ${ago(device.last_seen, now)})`}
+      {device.node_id} · {online ? "EN LIGNE" : `HORS LIGNE (dernier signal ${ago(device.last_seen, now)})`}
     </StatusBadge>
   );
 }
@@ -187,9 +361,16 @@ interface DashboardProps {
   unackOnly: boolean;
   setUnackOnly: (v: boolean) => void;
   onAck: (id: number) => void;
+  onAirlock: (state: boolean) => void;
+  onAlarm: (state: boolean) => void;
+  onEmergencyStop: () => void;
+  camRefreshKey: number;
 }
 
-function Dashboard({ data, now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, onAck }: DashboardProps) {
+function Dashboard({
+  data, now: _now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, onAck,
+  onAirlock, onAlarm, onEmergencyStop, camRefreshKey
+}: DashboardProps) {
   const { agg, latest, alerts, access, commands, device } = data;
   const s = agg.summary;
   const start = Date.parse(agg.since), end = Date.parse(agg.until), bucketMs = agg.bucket_s * 1000;
@@ -213,33 +394,88 @@ function Dashboard({ data, now, loading, hoverT, setHoverT, unackOnly, setUnackO
   return (
     <div className={loading ? "loading" : undefined}>
       <div className="grid tiles">
-        <StatTile label="Température" value={num(latest?.temperature_celsius)} unit="°C"
+        <StatTile label="Température DHT22" value={num(latest?.temperature_celsius)} unit="°C"
           detail={`min ${num(s.temperature_min)} · moy ${num(s.temperature_avg)} · max ${num(s.temperature_max)}`} />
-        <StatTile label="Humidité" value={num(latest?.humidity_percent, 0)} unit="%"
+        <StatTile label="Humidité DHT22" value={num(latest?.humidity_percent, 0)} unit="%"
           detail={`min ${num(s.humidity_min, 0)} · moy ${num(s.humidity_avg, 0)} · max ${num(s.humidity_max, 0)}`} />
-        <StatTile label="Gaz (ADC brut 0–4095)" value={num(latest?.gas_raw_ppm, 0)}
+        <StatTile label="Niveau Gaz MQ-2 (A0)" value={num(latest?.gas_raw_ppm, 0)}
           detail={`moy ${num(s.gas_avg, 0)} · pic ${num(s.gas_max, 0)}`} />
-        <StatTile label="Présence" value={latest?.presence_detected == null ? "—" : latest.presence_detected ? "Détectée" : "Aucune"}
-          detail={`${num(s.presence_ratio == null ? null : s.presence_ratio * 100, 0)} % du temps sur la période`} />
+        <StatTile label="Présence PIR" value={latest?.presence_detected == null ? "—" : latest.presence_detected ? "DÉTECTÉE" : "AUCUNE"}
+          detail={`${num(s.presence_ratio == null ? null : s.presence_ratio * 100, 0)} % du temps`} />
         <StatTile label="Alertes non acquittées" value={String(unack.length)}
           detail={`${alerts.length} alerte(s) sur la période`} />
-        <StatTile label="Signal Wi-Fi" value={num(device?.last_wifi_rssi_dbm, 0)} unit="dBm"
-          detail={`${s.samples} mesures · mémoire libre ${num(device?.last_free_heap_bytes == null ? null : device.last_free_heap_bytes / 1024, 0)} Ko`} />
+        <StatTile label="Signal Wi-Fi NodeMCU" value={num(device?.last_wifi_rssi_dbm, 0)} unit="dBm"
+          detail={`RAM libre : ${num(device?.last_free_heap_bytes == null ? null : device.last_free_heap_bytes / 1024, 0)} Ko`} />
       </div>
 
-      <Card title="État des actionneurs" sub={latest ? `Dernière télémétrie : ${dateTime(latest.received_at)} (${ago(latest.received_at, now)})` : "Aucune télémétrie reçue"}>
-        <div className="actuators">
-          {ACTUATORS.map((a) => {
-            const v = latest?.[a.key] as boolean | null | undefined;
-            return (
-              <div className="item" key={a.key}>
-                <span className="name">{a.label}</span>
-                <span className="badge">{v == null ? "Non transmis" : v ? `● ${a.on}` : `○ ${a.off}`}</span>
+      <div className="grid panels-split" style={{ marginTop: 12 }}>
+        <Card title="🎮 Panneau de Commande des Actionneurs" sub="Pilotage interactif de l'ESP8266 (Sas, Alarme, Arrêt)">
+          <div className="action-panel">
+            <div className="action-row">
+              <div className="action-info">
+                <strong>Sas Principal (Moteur Pas-à-Pas)</strong>
+                <span className="muted">État : {latest?.airlock_open ? "🟢 Ouvert" : "⚪ Fermé"}</span>
               </div>
-            );
-          })}
-        </div>
-      </Card>
+              <div className="action-btns">
+                <button className="btn btn-action" onClick={() => onAirlock(true)}>Ouvrir le Sas</button>
+                <button className="btn btn-action" onClick={() => onAirlock(false)}>Fermer le Sas</button>
+              </div>
+            </div>
+
+            <div className="action-row">
+              <div className="action-info">
+                <strong>Alarme Sonore & Visuelle (Buzzer + LED)</strong>
+                <span className="muted">État : {latest?.alarm_active ? "🔴 Alarme Active" : "⚪ Veille"}</span>
+              </div>
+              <div className="action-btns">
+                <button className="btn btn-danger" onClick={() => onAlarm(true)}>🚨 Déclencher Alarme</button>
+                <button className="btn btn-action" onClick={() => onAlarm(false)}>Couper Alarme</button>
+              </div>
+            </div>
+
+            <div className="action-row emergency-row">
+              <div className="action-info">
+                <strong className="danger-text">Arrêt d'Urgence Total</strong>
+                <span className="muted">Coupe toutes les bobines immédiatement</span>
+              </div>
+              <div className="action-btns">
+                <button className="btn btn-emergency" onClick={onEmergencyStop}>🛑 ARRÊT D'URGENCE</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="actuators-status-summary">
+            {ACTUATORS.map((a) => {
+              const v = latest?.[a.key] as boolean | null | undefined;
+              return (
+                <div className="actuator-chip" key={a.key}>
+                  <span className="chip-name">{a.label}</span>
+                  <span className={`chip-badge ${v ? "chip-on" : "chip-off"}`}>
+                    {v == null ? "Non reçu" : v ? `● ${a.on}` : `○ ${a.off}`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card title="📷 Retour Vidéo Webcam & Inférence IA (YOLO)" sub="Surveillance de table en direct & Détection d'intrus">
+          <div className="camera-feed-box">
+            <img
+              src={`/api/v1/vision/snapshot?t=${camRefreshKey}`}
+              alt="Retour direct Webcam IA"
+              className="camera-stream-img"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = "none";
+              }}
+            />
+            <div className="camera-overlay">
+              <span className="cam-badge live-dot">● DIRECT</span>
+              <span className="cam-node">PC SERVEUR LOCAL</span>
+            </div>
+          </div>
+        </Card>
+      </div>
 
       <div className="grid charts" style={{ marginTop: 12 }}>
         <Card title="Température (°C)" sub={`Moyenne par intervalle de ${bucketLabel}`}>
@@ -255,25 +491,6 @@ function Dashboard({ data, now, loading, hoverT, setHoverT, unackOnly, setUnackO
           <LineChart title="Présence" unit="%" digits={0} domain={[0, 100]} points={series.presence} {...chartProps} />
         </Card>
       </div>
-
-      <details>
-        <summary>Afficher les données agrégées ({agg.buckets.length} intervalles)</summary>
-        <div className="card table-wrap">
-          <table>
-            <thead><tr><th>Début</th><th>Mesures</th><th>Temp. moy (°C)</th><th>Hum. moy (%)</th><th>Gaz moy</th><th>Gaz pic</th><th>Présence (%)</th></tr></thead>
-            <tbody>
-              {[...agg.buckets].reverse().map((b) => (
-                <tr key={b.bucket}>
-                  <td>{dateTime(b.bucket)}</td><td className="num">{b.samples}</td>
-                  <td className="num">{num(b.temperature_avg)}</td><td className="num">{num(b.humidity_avg, 0)}</td>
-                  <td className="num">{num(b.gas_avg, 0)}</td><td className="num">{num(b.gas_max, 0)}</td>
-                  <td className="num">{num(b.presence_ratio == null ? null : b.presence_ratio * 100, 0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
 
       <div className="grid panels" style={{ marginTop: 12 }}>
         <Card title="Alertes par type" sub={`${alerts.length} alerte(s) sur la période`}>
@@ -300,44 +517,44 @@ function Dashboard({ data, now, loading, hoverT, setHoverT, unackOnly, setUnackO
       </div>
 
       <div style={{ marginTop: 12 }}>
-      <Card title="Alertes" sub={
-        <label className="check"><input type="checkbox" checked={unackOnly} onChange={(e) => setUnackOnly(e.target.checked)} />
-          Non acquittées uniquement</label>}>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Heure</th><th>Gravité</th><th>Type</th><th>Capteur</th><th>Valeur</th><th>Détails</th><th>Canal</th><th></th></tr></thead>
-            <tbody>
-              {shownAlerts.map((a) => (
-                <tr key={a.id}>
-                  <td>{dateTime(a.ts)}</td>
-                  <td><StatusBadge status={SEVERITY[a.severity].status}>{SEVERITY[a.severity].label}</StatusBadge></td>
-                  <td>{EVENT_LABELS[a.event_type] ?? a.event_type}</td>
-                  <td className="mono">{a.source_sensor ?? "—"}</td>
-                  <td className="num">{num(a.value, 1)}</td>
-                  <td>{a.details ?? "—"}</td>
-                  <td className="muted">{a.channel}</td>
-                  <td>{a.acknowledged
-                    ? <span className="muted">Acquittée</span>
-                    : <button className="btn" onClick={() => onAck(a.id)}>Acquitter</button>}</td>
-                </tr>
-              ))}
-              {!shownAlerts.length && <tr><td colSpan={8} className="muted">Aucune alerte</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+        <Card title="Journal des Alertes" sub={
+          <label className="check"><input type="checkbox" checked={unackOnly} onChange={(e) => setUnackOnly(e.target.checked)} />
+            Non acquittées uniquement</label>}>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Heure</th><th>Gravité</th><th>Type</th><th>Capteur</th><th>Valeur</th><th>Détails</th><th>Canal</th><th>Action</th></tr></thead>
+              <tbody>
+                {shownAlerts.map((a) => (
+                  <tr key={a.id}>
+                    <td>{dateTime(a.ts)}</td>
+                    <td><StatusBadge status={SEVERITY[a.severity].status}>{SEVERITY[a.severity].label}</StatusBadge></td>
+                    <td>{EVENT_LABELS[a.event_type] ?? a.event_type}</td>
+                    <td className="mono">{a.source_sensor ?? "—"}</td>
+                    <td className="num">{num(a.value, 1)}</td>
+                    <td>{a.details ?? "—"}</td>
+                    <td className="muted">{a.channel}</td>
+                    <td>{a.acknowledged
+                      ? <span className="muted">Acquittée</span>
+                      : <button className="btn btn-sm" onClick={() => onAck(a.id)}>Acquitter</button>}</td>
+                  </tr>
+                ))}
+                {!shownAlerts.length && <tr><td colSpan={8} className="muted">Aucune alerte</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <Card title="Commandes envoyées à l'ESP32" sub="Ordres superviseur et réponses d'accès RFID (sentinel/commands, sentinel/access/response)">
+        <Card title="Commandes transmises à l'ESP8266" sub="Ordres superviseur & réponses d'accès RFID (sentinel/commands)">
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Heure</th><th>Action</th><th>Message</th></tr></thead>
+              <thead><tr><th>Heure</th><th>Action</th><th>Message MQTT</th></tr></thead>
               <tbody>
                 {commands.map((c) => (
                   <tr key={c.id}>
                     <td>{dateTime(c.created_at)}</td>
-                    <td>{c.action ?? "—"}</td>
+                    <td><strong>{c.action ?? "—"}</strong></td>
                     <td className="mono">{JSON.stringify(c.payload)}</td>
                   </tr>
                 ))}

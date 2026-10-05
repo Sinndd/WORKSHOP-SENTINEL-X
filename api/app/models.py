@@ -122,6 +122,29 @@ class TriggerAlarm(Strict):
 Command = Annotated[OperateMotor | ControlMotors | EmergencyStopAll | TriggerAlarm, Field(discriminator="action")]
 
 
+# --- Authentification Opérateur --------------------------------------------------------
+class LoginRequest(Strict):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    role: str = "operator"
+
+
+class AirlockAction(Strict):
+    state: bool  # True = OPEN, False = CLOSE
+    duration_ms: Annotated[int, Field(ge=1, le=60_000)] = 3000
+
+
+class AlarmAction(Strict):
+    state: bool
+    color: Code | None = "RED"
+    sound: Code | None = "SIREN_ALERT"
+
+
 # --- Gestion des badges ---------------------------------------------------------------
 class BadgeIn(Strict):
     user_name: Annotated[str, Field(min_length=1, max_length=128)]

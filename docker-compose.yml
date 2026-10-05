@@ -101,8 +101,8 @@ services:
       - { type: volume, source: pgdata, target: /var/lib/postgresql/data }
       - { type: bind, source: ./db/init, target: /docker-entrypoint-initdb.d, read_only: true, bind: { create_host_path: false } }
     tmpfs:
-      - /var/run/postgresql:uid=70,gid=70,mode=0775,size=1m
-      - /tmp:uid=70,gid=70,mode=1777,size=16m
+      - /var/run/postgresql:size=1m,mode=1777
+      - /tmp:size=16m,mode=1777
     networks: [backend]   # jamais publiée
     mem_limit: 160m
     cpus: 1.0
@@ -135,8 +135,8 @@ services:
       - /tmp:size=1m
     networks: [backend]
     depends_on:
-      postgres: { condition: service_healthy }
-      mosquitto: { condition: service_healthy }
+      postgres: { condition: service_started }
+      mosquitto: { condition: service_started }
     mem_limit: 64m
     cpus: 0.5
     pids_limit: 16
@@ -168,6 +168,8 @@ services:
       MQTT_PASSWORD: ${MQTT_PASS_API:?}
       API_TOKEN: ${API_TOKEN:?lancer ./scripts/gen-env.sh}
       API_DEVICE_TOKEN: ${API_DEVICE_TOKEN:?lancer ./scripts/gen-env.sh}
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
+      DASHBOARD_PASS: ${DASHBOARD_PASS:-sentinel2026}
       MOTOR_COUNT: "6"
     volumes:
       - { type: bind, source: ./mosquitto/certs/ca.crt, target: /certs/ca.crt, read_only: true, bind: { create_host_path: false } }
@@ -175,8 +177,8 @@ services:
       - /tmp:size=8m
     networks: [frontend, backend]
     depends_on:
-      postgres: { condition: service_healthy }
-      mosquitto: { condition: service_healthy }
+      postgres: { condition: service_started }
+      mosquitto: { condition: service_started }
     mem_limit: 128m
     cpus: 0.5
     pids_limit: 32

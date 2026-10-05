@@ -20,6 +20,17 @@ export async function postJson<T>(path: string, token: string, body?: unknown): 
   return res.json() as Promise<T>;
 }
 
+export async function loginApi(username: string, password: string): Promise<{ token: string; username: string }> {
+  const res = await fetch("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (res.status === 401) throw new Unauthorized("Identifiant ou mot de passe incorrect");
+  if (!res.ok) throw new Error(`Erreur ${res.status}: ${res.statusText}`);
+  return res.json();
+}
+
 /** Télécharge un fichier protégé par le jeton (un lien <a> simple ne peut pas envoyer l'en-tête). */
 export async function download(path: string, token: string, filename: string): Promise<void> {
   const blob = await (await request(path, token)).blob();

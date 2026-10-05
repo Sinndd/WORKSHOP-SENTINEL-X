@@ -4,8 +4,12 @@ Base de données : variables libpq standard (PGHOST, PGDATABASE, PGUSER=sentinel
 """
 import os
 
-API_TOKEN = os.environ["API_TOKEN"]                  # dashboard / opérateur
-API_DEVICE_TOKEN = os.environ["API_DEVICE_TOKEN"]    # ESP32 : POST /api/v1/alerts
+API_TOKEN = os.environ.get("API_TOKEN", "aethercorp-sentinel-2026-secret-token")  # dashboard / opérateur
+API_DEVICE_TOKEN = os.environ.get("API_DEVICE_TOKEN", "esp32-sentinel-device-token")    # ESP32 : POST /api/v1/alerts
+
+# Authentification opérateur Dashboard (User / Mot de passe)
+DASHBOARD_USER = os.environ.get("DASHBOARD_USER", "admin")
+DASHBOARD_PASS = os.environ.get("DASHBOARD_PASS", "sentinel2026")
 
 MQTT_HOST = os.environ.get("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "8883"))

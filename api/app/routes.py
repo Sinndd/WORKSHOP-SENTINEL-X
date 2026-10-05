@@ -3,17 +3,23 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
-from fastapi.responses import StreamingResponse
+import secrets
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
+from fastapi.responses import Response as RawResponse, StreamingResponse
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from . import config
 from .db import SQL_ENSURE_DEVICE, pool
-from .models import (CARD_UID_RE, AccessEventOut, AlertIn, AlertOut, BadgeIn, BadgeOut, Command, CommandOut,
-                     DeviceOut, Severity, TelemetryAggregate, TelemetryOut, VisionEventOut, resolve_ts)
+from .models import (CARD_UID_RE, AccessEventOut, AirlockAction, AlarmAction, AlertIn, AlertOut, BadgeIn, BadgeOut,
+                     Command, CommandOut, DeviceOut, LoginRequest, LoginResponse, Severity, TelemetryAggregate,
+                     TelemetryOut, VisionEventOut, resolve_ts)
 from .mqtt_bridge import bridge
 from .security import require_device_or_operator, require_operator
+
+# Tampon mémoire RAM pour le dernier snapshot webcam (aucun impact I/O sur carte SD)
+_latest_snapshot: bytes | None = None
+_latest_snapshot_ts: datetime | None = None
 
 router = APIRouter(prefix="/api/v1")
 operator = [Depends(require_operator)]
@@ -225,7 +231,96 @@ def list_commands(limit: Limit = 100):
         return conn.execute("SELECT * FROM commands ORDER BY created_at DESC, id DESC LIMIT %s", (limit,)).fetchall()
 
 
-# --- Vision IA ------------------------------------------------------------------------------------------
+# --- Authentification Opérateur --------------------------------------------------------
+@router.post("/auth/login", response_model=LoginResponse, tags=["authentification"])
+def login(creds: LoginRequest):
+    """Connexion opérateur par identifiant et mot de passe (retourne le jeton Bearer)."""
+    user_ok = secrets.compare_digest(creds.username.strip(), config.DASHBOARD_USER)
+    pass_ok = secrets.compare_digest(creds.password.strip(), config.DASHBOARD_PASS)
+    # Permet aussi de se connecter en saisissant directement l'API_TOKEN dans le mot de passe
+    token_direct_ok = secrets.compare_digest(creds.password.strip(), config.API_TOKEN)
+
+    if not ((user_ok and pass_ok) or token_direct_ok):
+        raise HTTPException(401, "Identifiant ou mot de passe incorrect")
+
+    return {
+        "token": config.API_TOKEN,
+        "username": creds.username if user_ok else "operator",
+        "role": "operator",
+    }
+
+
+# --- Contrôle Réactif des Actionneurs (Raccourcis superviseur) ------------------------
+@router.post("/actuators/airlock", status_code=202, tags=["actionneurs"], dependencies=operator)
+def control_airlock(action: AirlockAction):
+    """Commande rapide d'ouverture ou de fermeture du sas principal."""
+    cmd = {
+        "action": "OPERATE_MOTOR",
+        "target": "AIRLOCK_MAIN",
+        "command": "OPEN" if action.state else "CLOSE",
+        "duration_ms": action.duration_ms,
+    }
+    try:
+        cmd_id = bridge.publish(config.TOPIC_COMMANDS, cmd, "OPERATE_MOTOR")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return {"id": cmd_id, "status": "sent", "command": cmd}
+
+
+@router.post("/actuators/alarm", status_code=202, tags=["actionneurs"], dependencies=operator)
+def control_alarm(action: AlarmAction):
+    """Déclenchement ou désactivation rapide de l'alarme (Buzzer + LED)."""
+    cmd = {
+        "action": "TRIGGER_ALARM",
+        "state": action.state,
+        "color": action.color,
+        "sound": action.sound,
+    }
+    try:
+        cmd_id = bridge.publish(config.TOPIC_COMMANDS, cmd, "TRIGGER_ALARM")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return {"id": cmd_id, "status": "sent", "command": cmd}
+
+
+@router.post("/actuators/emergency_stop", status_code=202, tags=["actionneurs"], dependencies=operator)
+def emergency_stop():
+    """Arrêt d'urgence immédiat de tous les moteurs."""
+    cmd = {"action": "EMERGENCY_STOP_ALL"}
+    try:
+        cmd_id = bridge.publish(config.TOPIC_COMMANDS, cmd, "EMERGENCY_STOP_ALL")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return {"id": cmd_id, "status": "sent", "command": cmd}
+
+
+# --- Vision IA & Flux Webcam ----------------------------------------------------------
+@router.post("/vision/snapshot", status_code=200, tags=["vision IA"], dependencies=operator)
+async def upload_snapshot(request: Request):
+    """Reçoit la dernière image JPEG traitée par le script IA webcam et la garde en mémoire."""
+    global _latest_snapshot, _latest_snapshot_ts
+    _latest_snapshot = await request.body()
+    _latest_snapshot_ts = datetime.now(timezone.utc)
+    return {"status": "ok", "bytes": len(_latest_snapshot), "ts": _latest_snapshot_ts.isoformat()}
+
+
+@router.get("/vision/snapshot", tags=["vision IA"], dependencies=operator)
+def get_latest_snapshot():
+    """Renvoie la dernière capture webcam en direct (JPEG) pour l'incrustation sur le Dashboard."""
+    global _latest_snapshot
+    if _latest_snapshot is None:
+        # Retourne une image SVG de substitution si aucune caméra n'a encore transmis
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+            <rect width="100%" height="100%" fill="#111317"/>
+            <circle cx="320" cy="200" r="40" fill="none" stroke="#2a78d6" stroke-width="4"/>
+            <circle cx="320" cy="200" r="15" fill="#2a78d6"/>
+            <text x="320" y="280" font-family="sans-serif" font-size="16" fill="#898781" text-anchor="middle">EN ATTENTE DU FLUX WEBCAM IA (YOLO)</text>
+            <text x="320" y="310" font-family="sans-serif" font-size="12" fill="#52514e" text-anchor="middle">CENTRE DE COMMANDEMENT SENTINEL-X</text>
+        </svg>"""
+        return RawResponse(content=svg, media_type="image/svg+xml")
+    return RawResponse(content=_latest_snapshot, media_type="image/jpeg")
+
+
 @router.get("/vision/events", response_model=list[VisionEventOut], tags=["vision IA"], dependencies=operator)
 def list_vision_events(limit: Limit = 100):
     with pool.connection() as conn:

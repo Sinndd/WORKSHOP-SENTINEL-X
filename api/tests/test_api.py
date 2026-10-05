@@ -108,6 +108,43 @@ class Http(unittest.TestCase):
         self.assertEqual(self.client.put("/api/v1/badges/not-a-uid", json={"user_name": "a",
                                          "clearance_level": "b"}, headers=op).status_code, 422)
 
+    def test_login(self):
+        # Échec mauvais identifiants
+        res_fail = self.client.post("/api/v1/auth/login", json={"username": "bad", "password": "wrong"})
+        self.assertEqual(res_fail.status_code, 401)
+
+        # Succès avec identifiants par défaut
+        res_ok = self.client.post("/api/v1/auth/login", json={"username": "admin", "password": "sentinel2026"})
+        self.assertEqual(res_ok.status_code, 200)
+        data = res_ok.json()
+        self.assertIn("token", data)
+        self.assertEqual(data["role"], "operator")
+
+        # Succès avec token direct dans le mot de passe
+        res_token = self.client.post("/api/v1/auth/login", json={"username": "any", "password": "op"})
+        self.assertEqual(res_token.status_code, 200)
+
+    def test_actuators_and_vision_validation(self):
+        # 401 si non authentifié
+        self.assertEqual(self.client.post("/api/v1/actuators/airlock", json={"state": True}).status_code, 401)
+        self.assertEqual(self.client.get("/api/v1/vision/snapshot").status_code, 401)
+
+        op = {"Authorization": "Bearer op"}
+        # Vision snapshot sans photo retourne le SVG de veille
+        res_snap = self.client.get("/api/v1/vision/snapshot", headers=op)
+        self.assertEqual(res_snap.status_code, 200)
+        self.assertIn("image/svg+xml", res_snap.headers["content-type"])
+
+        # Upload de snapshot binaire
+        res_upload = self.client.post("/api/v1/vision/snapshot", content=b"\xff\xd8\xff\xe0testjpeg", headers=op)
+        self.assertEqual(res_upload.status_code, 200)
+        self.assertTrue(res_upload.json()["bytes"] > 0)
+
+        # Après upload, snapshot retourne du jpeg
+        res_snap_after = self.client.get("/api/v1/vision/snapshot", headers=op)
+        self.assertEqual(res_snap_after.status_code, 200)
+        self.assertIn("image/jpeg", res_snap_after.headers["content-type"])
+
 
 if __name__ == "__main__":
     unittest.main()
