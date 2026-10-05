@@ -145,11 +145,14 @@ services:
       test: ["CMD-SHELL", "test -n \"$$(find /tmp/healthy -mmin -1 2>/dev/null)\""]
       start_period: 30s
 
-  # API FastAPI : alertes, télémétrie, décisions d'accès RFID, commandes (docs/API.md, /docs).
+  # API FastAPI : alertes, télémétrie, décisions d'accès RFID, commandes (docs/API.md, /docs)
+  # + tableau de bord React sur /dashboard/.
   api:
     <<: *hardening
-    build: ./api
-    image: sentinel/api:2.0.0
+    build:
+      context: .                  # api/ + dashboard/ (cf. .dockerignore : liste blanche, aucun secret)
+      dockerfile: api/Dockerfile
+    image: sentinel/api:2.1.0
     ports:
       - "${API_BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:

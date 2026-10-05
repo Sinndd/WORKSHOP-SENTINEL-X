@@ -1,0 +1,9 @@
+# Contexte de build de l'API = racine du dépôt : liste blanche stricte.
+# Ne JAMAIS envoyer au builder : .env, mosquitto/secrets/, mosquitto/certs/, backups/.
+*
+!api/requirements.txt
+!api/app/
+!dashboard/
+dashboard/node_modules/
+dashboard/dist/
+**/__pycache__/
