@@ -117,7 +117,7 @@ services:
   ingestor:
     <<: *hardening
     build: ./ingestor
-    image: sentinel/ingestor:1.0.0
+    image: sentinel/ingestor:2.0.0
     environment:
       TZ: ${TZ:-Europe/Paris}
       MQTT_HOST: mosquitto
@@ -145,11 +145,11 @@ services:
       test: ["CMD-SHELL", "test -n \"$$(find /tmp/healthy -mmin -1 2>/dev/null)\""]
       start_period: 30s
 
-  # PLACEHOLDER : à remplacer par le code de l'équipe DEV (garder /health et le port 8000).
+  # API FastAPI : alertes, télémétrie, décisions d'accès RFID, commandes (docs/API.md, /docs).
   api:
     <<: *hardening
     build: ./api
-    image: sentinel/api:0.1.0-placeholder
+    image: sentinel/api:2.0.0
     ports:
       - "${API_BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
@@ -163,6 +163,9 @@ services:
       MQTT_CAFILE: /certs/ca.crt
       MQTT_USERNAME: api
       MQTT_PASSWORD: ${MQTT_PASS_API:?}
+      API_TOKEN: ${API_TOKEN:?lancer ./scripts/gen-env.sh}
+      API_DEVICE_TOKEN: ${API_DEVICE_TOKEN:?lancer ./scripts/gen-env.sh}
+      MOTOR_COUNT: "6"
     volumes:
       - { type: bind, source: ./mosquitto/certs/ca.crt, target: /certs/ca.crt, read_only: true, bind: { create_host_path: false } }
     tmpfs:
