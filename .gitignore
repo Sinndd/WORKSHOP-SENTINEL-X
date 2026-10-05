@@ -1,0 +1,23 @@
+# --- Secrets : JAMAIS dans Git ---
+.env
+mosquitto/secrets/*
+!mosquitto/secrets/.gitkeep
+mosquitto/certs/*
+!mosquitto/certs/.gitkeep
+*.key
+*.pem
+
+# --- Données / sauvegardes ---
+backups/
+*.dump
+*.sqlite
+*.db
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+
+# --- Divers ---
+.DS_Store
+*.swp
