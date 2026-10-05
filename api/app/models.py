@@ -216,3 +216,29 @@ class VisionEventOut(BaseModel):
     frame_w: int
     frame_h: int
     snapshot_path: str | None
+
+
+class TelemetryStats(BaseModel):
+    samples: int
+    temperature_avg: float | None
+    temperature_min: float | None
+    temperature_max: float | None
+    humidity_avg: float | None
+    humidity_min: float | None
+    humidity_max: float | None
+    gas_avg: float | None
+    gas_max: int | None
+    presence_ratio: float | None          # part des mesures avec présence détectée (0..1)
+
+
+class TelemetryBucket(TelemetryStats):
+    bucket: datetime                      # début de l'intervalle
+
+
+class TelemetryAggregate(BaseModel):
+    node_id: str
+    since: datetime
+    until: datetime
+    bucket_s: int
+    summary: TelemetryStats
+    buckets: list[TelemetryBucket]
