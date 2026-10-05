@@ -5,7 +5,8 @@
   jusqu'à BATCH_MAX messages) ; en cas de panne PostgreSQL il réessaie le même
   lot avec backoff sans bloquer le keepalive MQTT.
 - Session persistante (clean_session=False) : les messages QoS 1 (alertes,
-  status, vision) sont conservés par le broker pendant un redémarrage de l'ingestor.
+  vision) sont conservés par le broker pendant un redémarrage de l'ingestor.
+- Les passages de badge (sentinel/access) sont traités par l'API, qui décide de l'accès.
 - /tmp/healthy est touché tant que MQTT est connecté et que la base répond.
 """
 import json
@@ -38,27 +39,32 @@ STATS_EVERY_S = int(os.environ.get("STATS_EVERY_S", "300"))
 HEALTH_FILE = pathlib.Path(os.environ.get("HEALTH_FILE", "/tmp/healthy"))
 
 SUBSCRIPTIONS = [
-    ("sentinel/+/telemetry", 0),
-    ("sentinel/+/alerts", 1),
-    ("sentinel/+/status", 1),
+    ("sentinel/telemetry", 0),
+    ("sentinel/alerts", 1),
     ("sentinel/vision/events", 1),
 ]
 
 SQL_TOUCH_DEVICE = """
-INSERT INTO devices (device_id, last_seen, state) VALUES (%s, %s, 'online')
-ON CONFLICT (device_id) DO UPDATE SET last_seen = EXCLUDED.last_seen, state = 'online'"""
-SQL_STATUS = """
-INSERT INTO devices (device_id, last_seen, state, ip, fw_version) VALUES (%s, %s, %s, %s, %s)
-ON CONFLICT (device_id) DO UPDATE SET last_seen = EXCLUDED.last_seen, state = EXCLUDED.state,
-    ip = COALESCE(EXCLUDED.ip, devices.ip), fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)"""
-SQL_ENSURE_DEVICE = "INSERT INTO devices (device_id) VALUES (%s) ON CONFLICT DO NOTHING"
-SQL_READING = """
-INSERT INTO sensor_readings (device_id, ts, received_at, seq, temperature_c, humidity_pct,
-                             gas_raw, motion, rssi_dbm, uptime_s)
-VALUES (%s, to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s, %s)"""
+INSERT INTO devices (node_id, last_seen, last_uptime_ms, last_wifi_rssi_dbm, last_free_heap_bytes)
+VALUES (%s, %s, %s, %s, %s)
+ON CONFLICT (node_id) DO UPDATE SET last_seen = EXCLUDED.last_seen,
+    last_uptime_ms = COALESCE(EXCLUDED.last_uptime_ms, devices.last_uptime_ms),
+    last_wifi_rssi_dbm = COALESCE(EXCLUDED.last_wifi_rssi_dbm, devices.last_wifi_rssi_dbm),
+    last_free_heap_bytes = COALESCE(EXCLUDED.last_free_heap_bytes, devices.last_free_heap_bytes)"""
+SQL_ENSURE_DEVICE = "INSERT INTO devices (node_id) VALUES (%s) ON CONFLICT DO NOTHING"
+SQL_TELEMETRY = """
+INSERT INTO telemetry (node_id, ts, device_timestamp, received_at, uptime_ms, temperature_celsius,
+    humidity_percent, gas_raw_ppm, presence_detected, airlock_open, gas_valve_open, ventilation_active,
+    barrier_open, alarm_active, wifi_rssi_dbm, free_heap_bytes)
+VALUES (%(node_id)s, to_timestamp(%(ts)s), %(device_timestamp)s, %(received_at)s, %(uptime_ms)s,
+    %(temperature_celsius)s, %(humidity_percent)s, %(gas_raw_ppm)s, %(presence_detected)s, %(airlock_open)s,
+    %(gas_valve_open)s, %(ventilation_active)s, %(barrier_open)s, %(alarm_active)s, %(wifi_rssi_dbm)s,
+    %(free_heap_bytes)s)"""
 SQL_ALERT = """
-INSERT INTO alerts (device_id, ts, received_at, type, severity, value, threshold, message, payload)
-VALUES (%s, to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s)"""
+INSERT INTO alerts (node_id, ts, device_timestamp, received_at, event_type, severity, source_sensor, value,
+    details, channel, payload)
+VALUES (%(node_id)s, to_timestamp(%(ts)s), %(device_timestamp)s, %(received_at)s, %(event_type)s,
+    %(severity)s, %(source_sensor)s, %(value)s, %(details)s, 'mqtt', %(payload)s)"""
 SQL_VISION = """
 INSERT INTO vision_events (ts, received_at, label, confidence, bbox, frame_w, frame_h, snapshot_path)
 VALUES (to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s)"""
@@ -118,18 +124,14 @@ class Ingestor:
         return self.db
 
     @staticmethod
-    def store(conn, kind, device_id, d, raw, received_at):
+    def store(conn, kind, d, raw, received_at):
         if kind == "telemetry":
-            conn.execute(SQL_TOUCH_DEVICE, (device_id, received_at))
-            conn.execute(SQL_READING, (device_id, d["ts"], received_at, d["seq"], d["temperature_c"],
-                                       d["humidity_pct"], d["gas_raw"], d["motion"], d["rssi_dbm"],
-                                       d["uptime_s"]))
-        elif kind == "status":
-            conn.execute(SQL_STATUS, (device_id, received_at, d["state"], d["ip"], d["fw"]))
+            conn.execute(SQL_TOUCH_DEVICE, (d["node_id"], received_at, d["uptime_ms"], d["wifi_rssi_dbm"],
+                                            d["free_heap_bytes"]))
+            conn.execute(SQL_TELEMETRY, {**d, "received_at": received_at})
         elif kind == "alerts":
-            conn.execute(SQL_ENSURE_DEVICE, (device_id,))
-            conn.execute(SQL_ALERT, (device_id, d["ts"], received_at, d["type"], d["severity"],
-                                     d["value"], d["threshold"], d["message"], Jsonb(raw)))
+            conn.execute(SQL_ENSURE_DEVICE, (d["node_id"],))
+            conn.execute(SQL_ALERT, {**d, "received_at": received_at, "payload": Jsonb(raw)})
         else:
             conn.execute(SQL_VISION, (d["ts"], received_at, d["label"], d["confidence"], Jsonb(d["bbox"]),
                                       d["frame_w"], d["frame_h"], d["snapshot_path"]))
@@ -138,12 +140,12 @@ class Ingestor:
         batch = []
         for topic, payload, received_at in items:
             try:
-                kind, device_id, data, raw = validate(topic, payload)
+                kind, data, raw = validate(topic, payload)
             except ValidationError as exc:
                 self.stats["rejected"] += 1
                 log.warning("rejeté %s: %s | %r", topic, exc, payload[:200])
                 continue
-            batch.append((kind, device_id, data, raw, received_at, topic, payload))
+            batch.append((kind, data, raw, received_at, topic, payload))
         if batch:
             self.write(batch)
 
@@ -154,8 +156,8 @@ class Ingestor:
             try:
                 conn = self.db_conn()
                 with conn.transaction(), conn.pipeline():  # pipeline : un seul aller-retour par lot
-                    for kind, device_id, data, raw, received_at, _, _ in batch:
-                        self.store(conn, kind, device_id, data, raw, received_at)
+                    for kind, data, raw, received_at, _, _ in batch:
+                        self.store(conn, kind, data, raw, received_at)
                 self.stats["stored"] += len(batch)
                 self.last_db_ok = time.monotonic()
                 return
@@ -172,7 +174,7 @@ class Ingestor:
                     return
                 # Erreur de données (contrainte, FK...) : on ne bloque pas la file pour un message.
                 self.stats["rejected"] += 1
-                topic, payload = batch[0][5], batch[0][6]
+                topic, payload = batch[0][4], batch[0][5]
                 log.warning("rejeté par la base %s: %s | %r", topic, exc.diag.message_primary or exc, payload[:200])
                 return
 

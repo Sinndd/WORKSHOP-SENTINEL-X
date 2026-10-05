@@ -1,18 +1,31 @@
-"""Tests de la validation du contrat MQTT : python -m unittest -v"""
+"""Tests de la validation du contrat v2 : python -m unittest -v"""
 import json
 import unittest
 
-from validation import ValidationError, validate
+from validation import ValidationError, resolve_ts, validate
 
 NOW = 1_790_000_000
-T = "sentinel/sentinel-01/"
 
-TELEMETRY = {"v": 1, "device_id": "sentinel-01", "ts": NOW - 2, "seq": 42, "temperature_c": 22.4,
-             "humidity_pct": 48.1, "gas_raw": 312, "motion": False, "rssi_dbm": -61, "uptime_s": 3600}
-ALERT = {"v": 1, "device_id": "sentinel-01", "ts": NOW - 1, "type": "gas_high", "severity": "critical",
-         "value": 812, "threshold": 600, "message": "Gaz au-dessus du seuil"}
-STATUS = {"v": 1, "state": "online", "ip": "192.168.10.20", "fw": "1.0.0"}
-VISION = {"v": 1, "ts": NOW, "label": "person", "confidence": 0.87, "bbox": [120, 40, 200, 380],
+# Exemple de 03_SPECIFICATION_API_ET_CONTRAT_DONNEES.md (timestamp ramené à "maintenant").
+TELEMETRY = {
+    "node_id": "SENTINEL-X-CORE", "timestamp": NOW - 2, "uptime_ms": 142580,
+    "metrics": {"temperature_celsius": 23.4, "humidity_percent": 48.0, "gas_raw_ppm": 215,
+                "presence_detected": False},
+    "actuators_state": {"airlock_open": False, "gas_valve_open": True, "ventilation_active": False,
+                        "barrier_open": False, "alarm_active": False},
+    "system": {"wifi_rssi_dbm": -58, "free_heap_bytes": 194200},
+}
+# Trame réellement émise par le firmware 04_FIRMWARE_ESP32_COMPLET.md (timestamp = millis()).
+FIRMWARE_TELEMETRY = {
+    "node_id": "SENTINEL-X-CORE", "timestamp": 61234,
+    "metrics": {"temperature_celsius": 0.0, "humidity_percent": 0.0, "gas_raw_ppm": 4095,
+                "presence_detected": True},
+    "actuators_state": {"airlock_open": False},
+}
+ALERT = {"node_id": "SENTINEL-X-CORE", "timestamp": NOW - 1, "event_type": "INTRUSION_DETECTED",
+         "severity": "CRITICAL", "source_sensor": "PIR_MOTION", "value": 1.0,
+         "details": "Mouvement anormal detecte dans le perimetre d'acces restreint"}
+VISION = {"ts": NOW, "label": "person", "confidence": 0.87, "bbox": [120, 40, 200, 380],
           "frame_w": 640, "frame_h": 480, "snapshot_path": "snapshots/1790000000.jpg"}
 
 
@@ -20,60 +33,81 @@ def run(topic, msg):
     return validate(topic, json.dumps(msg).encode(), now=NOW)
 
 
-class ValidMessages(unittest.TestCase):
-    def test_telemetry(self):
-        kind, dev, data, _ = run(T + "telemetry", TELEMETRY)
-        self.assertEqual((kind, dev, data["gas_raw"]), ("telemetry", "sentinel-01", 312))
+def without(d, key):
+    return {k: v for k, v in d.items() if k != key}
 
-    def test_telemetry_dht_failure_is_null(self):
-        _, _, data, _ = run(T + "telemetry", {**TELEMETRY, "temperature_c": None, "humidity_pct": None})
-        self.assertIsNone(data["temperature_c"])
+
+class Timestamps(unittest.TestCase):
+    def test_epoch_seconds(self):
+        self.assertEqual(resolve_ts(NOW - 10, NOW), NOW - 10)
+
+    def test_epoch_milliseconds(self):
+        self.assertEqual(resolve_ts((NOW - 10) * 1000, NOW), NOW - 10)
+
+    def test_millis_since_boot_falls_back_to_reception(self):
+        self.assertEqual(resolve_ts(61234, NOW), NOW)
+
+    def test_future_falls_back_to_reception(self):
+        self.assertEqual(resolve_ts(NOW + 3600, NOW), NOW)
+
+
+class ValidMessages(unittest.TestCase):
+    def test_spec_telemetry(self):
+        kind, data, _ = run("sentinel/telemetry", TELEMETRY)
+        self.assertEqual((kind, data["gas_raw_ppm"], data["gas_valve_open"], data["ts"]),
+                         ("telemetry", 215, True, NOW - 2))
+
+    def test_firmware_telemetry(self):
+        _, data, _ = run("sentinel/telemetry", FIRMWARE_TELEMETRY)
+        self.assertEqual((data["device_timestamp"], data["ts"], data["wifi_rssi_dbm"], data["barrier_open"]),
+                         (61234, NOW, None, None))
+
+    def test_null_dht(self):
+        msg = {**TELEMETRY, "metrics": {**TELEMETRY["metrics"], "temperature_celsius": None}}
+        self.assertIsNone(run("sentinel/telemetry", msg)[1]["temperature_celsius"])
+
+    def test_extra_fields_tolerated(self):
+        run("sentinel/telemetry", {**TELEMETRY, "type": "TELEMETRY", "motors": []})
 
     def test_alert(self):
-        self.assertEqual(run(T + "alerts", ALERT)[2]["type"], "gas_high")
+        self.assertEqual(run("sentinel/alerts", ALERT)[1]["event_type"], "INTRUSION_DETECTED")
 
-    def test_status_and_lwt(self):
-        self.assertEqual(run(T + "status", STATUS)[2]["ip"], "192.168.10.20")
-        self.assertEqual(run(T + "status", {"v": 1, "state": "offline"})[2]["state"], "offline")
+    def test_alert_minimal(self):
+        msg = {"node_id": "SENTINEL-X-CORE", "event_type": "GAS_LEAK_WARNING", "severity": "WARNING"}
+        self.assertEqual(run("sentinel/alerts", msg)[1]["ts"], NOW)
 
     def test_vision(self):
-        kind, dev, data, _ = run("sentinel/vision/events", VISION)
-        self.assertEqual((kind, dev, data["bbox"]), ("vision", None, [120, 40, 200, 380]))
-
-    def test_unknown_extra_field_tolerated(self):
-        run(T + "telemetry", {**TELEMETRY, "battery_v": 3.7})
+        self.assertEqual(run("sentinel/vision/events", VISION)[1]["bbox"], [120, 40, 200, 380])
 
 
 class InvalidMessages(unittest.TestCase):
+    T, A = "sentinel/telemetry", "sentinel/alerts"
+    M = TELEMETRY["metrics"]
     CASES = [
-        ("bad json", T + "telemetry", b"{not json"),
-        ("not object", T + "telemetry", b"[1,2]"),
-        ("binary", T + "telemetry", b"\xff\xfe"),
-        ("too big", T + "telemetry", b"{" + b" " * 2000 + b"}"),
-        ("unknown topic", "sentinel/sentinel-01/other", TELEMETRY),
-        ("bad device in topic", "sentinel/Sentinel_01/telemetry", TELEMETRY),
-        ("missing v", T + "telemetry", {k: v for k, v in TELEMETRY.items() if k != "v"}),
-        ("v=2", T + "telemetry", {**TELEMETRY, "v": 2}),
-        ("v=true", T + "telemetry", {**TELEMETRY, "v": True}),
-        ("device mismatch", T + "telemetry", {**TELEMETRY, "device_id": "sentinel-02"}),
-        ("gas > 1023", T + "telemetry", {**TELEMETRY, "gas_raw": 1024}),
-        ("gas float", T + "telemetry", {**TELEMETRY, "gas_raw": 3.5}),
-        ("motion int", T + "telemetry", {**TELEMETRY, "motion": 1}),
-        ("temp str", T + "telemetry", {**TELEMETRY, "temperature_c": "22"}),
-        ("humidity 120", T + "telemetry", {**TELEMETRY, "humidity_pct": 120}),
-        ("rssi positive", T + "telemetry", {**TELEMETRY, "rssi_dbm": 5}),
-        ("ts before NTP", T + "telemetry", {**TELEMETRY, "ts": 12}),
-        ("ts future", T + "telemetry", {**TELEMETRY, "ts": NOW + 3600}),
-        ("alert type", T + "alerts", {**ALERT, "type": "fire"}),
-        ("alert severity", T + "alerts", {**ALERT, "severity": "high"}),
-        ("alert message long", T + "alerts", {**ALERT, "message": "x" * 300}),
-        ("status state", T + "status", {**STATUS, "state": "sleeping"}),
-        ("status bad ip", T + "status", {**STATUS, "ip": "999.1.1.1"}),
-        ("status online w/o ip", T + "status", {"v": 1, "state": "online", "fw": "1.0.0"}),
+        ("bad json", T, b"{not json"),
+        ("not object", T, b"[1,2]"),
+        ("binary", T, b"\xff\xfe"),
+        ("too big", T, b"{" + b" " * 3000 + b"}"),
+        ("unknown topic", "sentinel/other", TELEMETRY),
+        ("old v1 topic", "sentinel/sentinel-01/telemetry", TELEMETRY),
+        ("missing node_id", T, without(TELEMETRY, "node_id")),
+        ("bad node_id", T, {**TELEMETRY, "node_id": "bad id!"}),
+        ("missing timestamp", T, without(TELEMETRY, "timestamp")),
+        ("negative timestamp", T, {**TELEMETRY, "timestamp": -5}),
+        ("missing metrics", T, without(TELEMETRY, "metrics")),
+        ("metrics not object", T, {**TELEMETRY, "metrics": [1]}),
+        ("gas > 4095", T, {**TELEMETRY, "metrics": {**M, "gas_raw_ppm": 4096}}),
+        ("gas float", T, {**TELEMETRY, "metrics": {**M, "gas_raw_ppm": 3.5}}),
+        ("presence int", T, {**TELEMETRY, "metrics": {**M, "presence_detected": 1}}),
+        ("temp str", T, {**TELEMETRY, "metrics": {**M, "temperature_celsius": "22"}}),
+        ("humidity 120", T, {**TELEMETRY, "metrics": {**M, "humidity_percent": 120}}),
+        ("actuator str", T, {**TELEMETRY, "actuators_state": {"airlock_open": "yes"}}),
+        ("rssi positive", T, {**TELEMETRY, "system": {"wifi_rssi_dbm": 5}}),
+        ("alert type", A, {**ALERT, "event_type": "FIRE"}),
+        ("alert severity lowercase", A, {**ALERT, "severity": "critical"}),
+        ("alert details long", A, {**ALERT, "details": "x" * 600}),
         ("vision confidence", "sentinel/vision/events", {**VISION, "confidence": 1.5}),
-        ("vision bbox len", "sentinel/vision/events", {**VISION, "bbox": [1, 2, 3]}),
         ("vision bbox outside", "sentinel/vision/events", {**VISION, "bbox": [600, 0, 200, 10]}),
-        ("vision empty label", "sentinel/vision/events", {**VISION, "label": ""}),
     ]
 
     def test_rejected(self):
