@@ -81,8 +81,9 @@ check "télémétrie (format spec) en base" \
   sql_is "SELECT count(*) FROM telemetry WHERE free_heap_bytes=$MARK AND gas_valve_open AND gas_raw_ppm=215 AND ts=to_timestamp($NOW)" 1
 check "télémétrie firmware (timestamp=millis) horodatée à réception" \
   sql_is "SELECT count(*) FROM telemetry WHERE device_timestamp=$MARK AND gas_raw_ppm=4095 AND abs(extract(epoch FROM ts - received_at)) < 1" 1
+# (pas de valeur témoin ici : un vrai ESP connecté sous le même node_id met aussi la ligne à jour)
 check "devices.last_seen mis à jour" \
-  sql_is "SELECT count(*) FROM devices WHERE node_id='SENTINEL-X-CORE' AND last_seen > now() - interval '1 minute' AND last_free_heap_bytes=$MARK" 1
+  sql_is "SELECT count(*) FROM devices WHERE node_id='SENTINEL-X-CORE' AND last_seen > now() - interval '1 minute'" 1
 check "alerte MQTT en base (channel mqtt)" sql_is "SELECT channel FROM alerts WHERE details='$RUN_ID-mqtt'" mqtt
 check "événement vision en base" sql_is "SELECT count(*) FROM vision_events WHERE snapshot_path='$RUN_ID.jpg'" 1
 ingestor_logs="$(docker compose logs --since 1m ingestor)"   # pas de `logs | grep -q` (SIGPIPE + pipefail)
