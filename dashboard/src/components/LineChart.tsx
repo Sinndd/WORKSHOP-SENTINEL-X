@@ -28,8 +28,10 @@ function niceTicks(min: number, max: number, count = 4): number[] {
   const raw = (max - min) / count;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 5, 10].map((k) => k * mag).find((s) => s >= raw) ?? raw;
-  const ticks: number[] = [];
-  for (let v = Math.floor(min / step) * step; v <= max + step / 2; v += step) ticks.push(Number(v.toFixed(10)));
+  // De la graduation sous le minimum jusqu'à la première graduation >= maximum (toutes les valeurs dans l'axe).
+  let v = Math.floor(min / step) * step;
+  const ticks = [Number(v.toFixed(10))];
+  while (v < max - step * 1e-9) { v += step; ticks.push(Number(v.toFixed(10))); }
   return ticks;
 }
 
@@ -58,16 +60,20 @@ export function LineChart({ title, unit, points, start, end, bucketMs, digits = 
   const y = (v: number) => M.top + h - ((v - yMin) / (yMax - yMin || 1)) * h;
 
   // Segments : la ligne s'interrompt quand des intervalles manquent (ESP hors ligne).
-  const segments: string[] = [];
-  let current = "";
+  // Un segment d'un seul point (mesure isolée) n'a pas de longueur : il est dessiné comme un point.
+  const runs: Point[][] = [];
+  let run: Point[] = [];
   let prevT: number | null = null;
   for (const p of points) {
     const gap = prevT != null && p.t - prevT > bucketMs * 1.5;
-    if (p.v == null || gap) { if (current) segments.push(current); current = ""; }
-    if (p.v != null) current += `${current ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
+    if (p.v == null || gap) { if (run.length) runs.push(run); run = []; }
+    if (p.v != null) run.push(p);
     prevT = p.t;
   }
-  if (current) segments.push(current);
+  if (run.length) runs.push(run);
+  const segments = runs.filter((r) => r.length > 1)
+    .map((r) => r.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v!).toFixed(1)}`).join(""));
+  const isolated = runs.filter((r) => r.length === 1).map((r) => r[0]);
 
   const ticksX = Array.from({ length: Math.max(2, Math.min(6, Math.floor(w / 110))) + 1 },
     (_, i) => start + (span * i) / Math.max(2, Math.min(6, Math.floor(w / 110))));
@@ -104,7 +110,8 @@ export function LineChart({ title, unit, points, start, end, bucketMs, digits = 
             textAnchor={i === 0 ? "start" : i === ticksX.length - 1 ? "end" : "middle"}>{tick(t, span)}</text>
         ))}
         {segments.map((d, i) => <path key={i} className="line" d={d} />)}
-        {segments.length === 0 && (
+        {isolated.map((p) => <circle key={p.t} className="marker" cx={x(p.t)} cy={y(p.v!)} r={4} />)}
+        {runs.length === 0 && (
           <text className="empty" x={M.left + w / 2} y={M.top + h / 2} textAnchor="middle">Aucune donnée sur la période</text>
         )}
         {hovered && (
