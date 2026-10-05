@@ -44,11 +44,14 @@ fi
 echo; echo "== Base PostgreSQL"
 docker compose exec -T postgres psql -U postgres -d "$POSTGRES_DB" -P footer=off -c "
 SELECT 'devices' AS table_name, count(*) AS lignes FROM devices
-UNION ALL SELECT 'sensor_readings', count(*) FROM sensor_readings
+UNION ALL SELECT 'telemetry', count(*) FROM telemetry
 UNION ALL SELECT 'alerts', count(*) FROM alerts
+UNION ALL SELECT 'badges', count(*) FROM badges
+UNION ALL SELECT 'access_events', count(*) FROM access_events
+UNION ALL SELECT 'commands', count(*) FROM commands
 UNION ALL SELECT 'vision_events', count(*) FROM vision_events;" \
   -c "SELECT pg_size_pretty(pg_database_size(current_database())) AS taille_base,
             (SELECT count(*) FROM alerts WHERE NOT acknowledged) AS alertes_non_acquittees,
-            (SELECT max(received_at) FROM sensor_readings) AS derniere_mesure;" \
-  -c "SELECT device_id, state, last_seen, ip, fw_version FROM devices ORDER BY device_id;"
+            (SELECT max(received_at) FROM telemetry) AS derniere_mesure;" \
+  -c "SELECT node_id, last_seen, last_wifi_rssi_dbm AS rssi_dbm, last_free_heap_bytes AS heap FROM devices ORDER BY node_id;"
 exit $rc
