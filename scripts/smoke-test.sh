@@ -65,7 +65,9 @@ wait_sql "SELECT state FROM devices WHERE device_id='sentinel-01' AND last_seen 
 sleep 2
 [[ "$(sql "SELECT count(*) FROM alerts WHERE message='$RUN_ID'")" == 1 ]] \
   && ok "ACL (sentinel-02) et alerte hors contrat non insérées" || ko "message interdit inséré"
-docker compose logs --since 1m ingestor | grep -q 'rejeté.*JSON invalide' && ok "JSON invalide rejeté et journalisé" || ko "rejet JSON non journalisé"
+# Logs capturés d'abord : `logs | grep -q` + pipefail échoue aléatoirement (SIGPIPE).
+ingestor_logs="$(docker compose logs --since 1m ingestor)"
+grep -q 'rejeté.*JSON invalide' <<<"$ingestor_logs" && ok "JSON invalide rejeté et journalisé" || ko "rejet JSON non journalisé"
 sql "INSERT INTO devices (device_id) VALUES ('smoke-ro-check')" >/dev/null 2>&1 && ko "sentinel_ro peut écrire" || ok "sentinel_ro ne peut pas écrire"
 [[ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q ingestor)")" == healthy ]] \
   && ok "ingestor toujours healthy" || ko "ingestor non healthy"
