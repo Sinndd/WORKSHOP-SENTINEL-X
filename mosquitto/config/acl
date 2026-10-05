@@ -1,0 +1,29 @@
+# ACL Mosquitto — SENTINEL-X. Tout ce qui n'est pas autorisé est refusé.
+# (En MQTT 3.1.1, une publication refusée est ignorée silencieusement.)
+
+# Boîtier ESP8266 sentinel-01 (Last Will sur .../status)
+user esp_sentinel-01
+topic write sentinel/sentinel-01/telemetry
+topic write sentinel/sentinel-01/alerts
+topic write sentinel/sentinel-01/status
+topic read  sentinel/sentinel-01/cmd/#
+
+# Ingestion MQTT -> PostgreSQL
+user ingestor
+topic read sentinel/+/telemetry
+topic read sentinel/+/alerts
+topic read sentinel/+/status
+topic read sentinel/vision/events
+
+# API (lecture globale, envoi de commandes aux boîtiers)
+user api
+topic read  sentinel/#
+topic write sentinel/+/cmd/#
+
+# Script de vision IA (sur l'hôte)
+user vision
+topic write sentinel/vision/events
+
+# Healthcheck Docker du broker : uniquement l'uptime.
+user healthcheck
+topic read $SYS/broker/uptime
