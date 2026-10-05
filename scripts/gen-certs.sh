@@ -11,6 +11,8 @@
 #       ne compare que les dNSName.
 #
 # Usage : ./scripts/gen-certs.sh [--force-server]
+#         SENTINEL_EXTRA_IPS="<ip> ..." (dans .env ou l'environnement) ajoute des IP au certificat serveur ;
+#         la CA ne change pas, le firmware n'a donc pas à être reflashé.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -22,6 +24,8 @@ HOST="${SENTINEL_HOSTNAME:-$(hostname -s)}"
 AP_IP="${SENTINEL_AP_IP:-192.168.10.1}"
 DIR=mosquitto/certs
 SAN="IP:${AP_IP},DNS:${AP_IP},DNS:sentinel.local,DNS:${HOST},DNS:mosquitto,DNS:localhost,IP:127.0.0.1"
+# Adresses supplémentaires (ex. poste de dev joignable par l'ESP) : SENTINEL_EXTRA_IPS="10.69.127.207 192.168.1.20"
+for ip in ${SENTINEL_EXTRA_IPS:-}; do SAN+=",IP:${ip},DNS:${ip}"; done
 
 umask 077
 mkdir -p "$DIR"
