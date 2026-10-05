@@ -1,26 +1,27 @@
-# ACL Mosquitto — SENTINEL-X. Tout ce qui n'est pas autorisé est refusé.
+# ACL Mosquitto — SENTINEL-X (contrat v2, nœud ESP32 unique). Tout le reste est refusé.
 # (En MQTT 3.1.1, une publication refusée est ignorée silencieusement.)
 
-# Boîtier ESP8266 sentinel-01 (Last Will sur .../status)
-user esp_sentinel-01
-topic write sentinel/sentinel-01/telemetry
-topic write sentinel/sentinel-01/alerts
-topic write sentinel/sentinel-01/status
-topic read  sentinel/sentinel-01/cmd/#
+# Module ESP32 SENTINEL-X-CORE
+user esp32
+topic write sentinel/telemetry
+topic write sentinel/alerts
+topic write sentinel/access
+topic read  sentinel/commands
+topic read  sentinel/access/response
 
 # Ingestion MQTT -> PostgreSQL
 user ingestor
-topic read sentinel/+/telemetry
-topic read sentinel/+/alerts
-topic read sentinel/+/status
+topic read sentinel/telemetry
+topic read sentinel/alerts
 topic read sentinel/vision/events
 
-# API (lecture globale, envoi de commandes aux boîtiers)
+# API : lecture globale, décisions d'accès RFID et commandes superviseur
 user api
 topic read  sentinel/#
-topic write sentinel/+/cmd/#
+topic write sentinel/commands
+topic write sentinel/access/response
 
-# Script de vision IA (sur l'hôte)
+# Script IA caméra (sur l'hôte)
 user vision
 topic write sentinel/vision/events
 

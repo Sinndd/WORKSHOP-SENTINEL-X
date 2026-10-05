@@ -6,6 +6,7 @@
 # Aucun mot de passe ne transite en argument de commande (pas de fuite via `ps`).
 #
 # Usage : ./scripts/gen-env.sh [--force]
+# (sans --force, les clés apparues dans .env.example sont ajoutées au .env existant)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,6 +21,15 @@ umask 077
 
 if [[ -f .env && $FORCE -eq 0 ]]; then
   echo "[gen-env] .env existe déjà : conservé (utiliser --force pour régénérer)."
+  # Clés ajoutées à .env.example depuis la génération : complétées avec un nouveau secret, sans toucher aux autres.
+  sed -e '/^#/d' -e 's/[[:space:]]*#.*$//' -e '/^$/d' .env.example | while IFS= read -r line; do
+    key="${line%%=*}"
+    if ! grep -q "^${key}=" .env; then
+      [[ $line == *change-me* ]] && line="${line/change-me/$(rand)}"
+      printf '%s\n' "$line" >> .env
+      echo "[gen-env] clé ajoutée : $key"
+    fi
+  done
 else
   [[ -f .env ]] && cp .env ".env.bak.$(date +%Y%m%d%H%M%S)"
   hn="$(hostname -s 2>/dev/null || hostname)"
@@ -48,7 +58,7 @@ SECRETS_DIR="$PWD/mosquitto/secrets"
 tmp="$SECRETS_DIR/passwd.tmp"
 trap 'rm -f "$tmp"' EXIT
 {
-  printf 'esp_sentinel-01:%s\n' "$MQTT_PASS_ESP_SENTINEL_01"
+  printf 'esp32:%s\n'           "$MQTT_PASS_ESP32"
   printf 'ingestor:%s\n'        "$MQTT_PASS_INGESTOR"
   printf 'api:%s\n'             "$MQTT_PASS_API"
   printf 'vision:%s\n'          "$MQTT_PASS_VISION"
