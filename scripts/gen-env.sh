@@ -57,7 +57,7 @@ trap 'rm -f "$tmp"' EXIT
 
 # mosquitto_passwd -U hache le fichier en place (PBKDF2-SHA512), sans réseau.
 docker run --rm --network none --user "${PUID}:${PGID}" \
-  -v "$SECRETS_DIR:/secrets" "$MOSQUITTO_IMAGE" \
+  --mount "type=bind,source=$SECRETS_DIR,target=/secrets" "$MOSQUITTO_IMAGE" \
   mosquitto_passwd -U /secrets/passwd.tmp
 mv "$tmp" "$SECRETS_DIR/passwd"
 chmod 600 "$SECRETS_DIR/passwd"

@@ -1,0 +1,190 @@
+# SENTINEL-X — stack serveur local (Raspberry Pi 3 B+, 1 Go, arm64)
+# Budget RAM visé : ~450 Mo pour toute la stack (limites ci-dessous : 384 Mo).
+# Prérequis : ./scripts/gen-env.sh && ./scripts/gen-certs.sh
+# Montages bind en syntaxe longue + create_host_path: false : échec explicite si un
+# certificat/secret manque (au lieu d'un dossier vide créé par Docker).
+name: sentinel
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
+
+# Durcissement commun : redémarrage auto, aucune capacité Linux, pas d'élévation
+# de privilèges, système de fichiers racine en lecture seule.
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  read_only: true
+  logging: *logging
+
+x-healthcheck: &healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+services:
+  mosquitto:
+    <<: *hardening
+    image: eclipse-mosquitto:2.1.2-alpine
+    # UID de l'hôte : passwd/acl/clé TLS restent en 0600 côté hôte, sans chown.
+    user: "${PUID:?lancer ./scripts/gen-env.sh}:${PGID:?lancer ./scripts/gen-env.sh}"
+    ports:
+      - "${MQTT_BIND_ADDR:-0.0.0.0}:${MQTT_PORT:-8883}:8883"   # MQTTS uniquement, pas de 1883
+    environment:
+      MQTT_PASS_HEALTHCHECK: ${MQTT_PASS_HEALTHCHECK:?}
+    volumes:
+      - { type: bind, source: ./mosquitto/config, target: /mosquitto/config, read_only: true, bind: { create_host_path: false } }
+      - { type: bind, source: ./mosquitto/secrets/passwd, target: /mosquitto/secrets/passwd, read_only: true, bind: { create_host_path: false } }
+      - { type: bind, source: ./mosquitto/certs/ca.crt, target: /mosquitto/certs/ca.crt, read_only: true, bind: { create_host_path: false } }
+      - { type: bind, source: ./mosquitto/certs/server.crt, target: /mosquitto/certs/server.crt, read_only: true, bind: { create_host_path: false } }
+      - { type: bind, source: ./mosquitto/certs/server.key, target: /mosquitto/certs/server.key, read_only: true, bind: { create_host_path: false } }
+    networks: [frontend, backend]
+    mem_limit: 32m
+    cpus: 0.5
+    pids_limit: 32
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt -u healthcheck -P \"$$MQTT_PASS_HEALTHCHECK\" -t '$$SYS/broker/uptime' -C 1 -W 5 > /dev/null"]
+      start_period: 10s
+
+  postgres:
+    <<: *hardening
+    image: postgres:17.11-alpine3.24
+    user: "70:70"   # utilisateur postgres de l'image : pas de gosu, donc cap_drop ALL suffit
+    # Réglages pour 1 Go de RAM partagés avec l'OS et l'IA ; checkpoints espacés pour la carte SD.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=24MB
+      - -c
+      - max_connections=15
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - fsync=on
+      - -c
+      - synchronous_commit=off        # perte possible < 1 s de données en cas de coupure, pas de corruption
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - max_wal_size=256MB
+      - -c
+      - wal_compression=on
+      - -c
+      - max_worker_processes=2
+      - -c
+      - max_parallel_workers=0
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - autovacuum_max_workers=1
+      - -c
+      - jit=off
+      - -c
+      - log_min_duration_statement=1000
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?lancer ./scripts/gen-env.sh}
+      POSTGRES_INITDB_ARGS: "--data-checksums"   # détecte la corruption de la carte SD
+      SENTINEL_APP_PASSWORD: ${SENTINEL_APP_PASSWORD:?}
+      SENTINEL_RO_PASSWORD: ${SENTINEL_RO_PASSWORD:?}
+    volumes:
+      - { type: volume, source: pgdata, target: /var/lib/postgresql/data }
+      - { type: bind, source: ./db/init, target: /docker-entrypoint-initdb.d, read_only: true, bind: { create_host_path: false } }
+    tmpfs:
+      - /var/run/postgresql:uid=70,gid=70,mode=0775,size=1m
+      - /tmp:uid=70,gid=70,mode=1777,size=16m
+    networks: [backend]   # jamais publiée
+    mem_limit: 160m
+    cpus: 1.0
+    pids_limit: 64
+    stop_grace_period: 30s
+    healthcheck:
+      <<: *healthcheck
+      # TCP sur 127.0.0.1 : faux pendant l'init (le serveur temporaire n'écoute que le socket Unix).
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U postgres -d \"$$POSTGRES_DB\""]
+      start_period: 60s
+
+  ingestor:
+    <<: *hardening
+    build: ./ingestor
+    image: sentinel/ingestor:1.0.0
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "8883"
+      MQTT_CAFILE: /certs/ca.crt
+      MQTT_USERNAME: ingestor
+      MQTT_PASSWORD: ${MQTT_PASS_INGESTOR:?}
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-sentinel}
+      PGUSER: sentinel_app
+      PGPASSWORD: ${SENTINEL_APP_PASSWORD:?}
+    volumes:
+      - { type: bind, source: ./mosquitto/certs/ca.crt, target: /certs/ca.crt, read_only: true, bind: { create_host_path: false } }
+    tmpfs:
+      - /tmp:size=1m
+    networks: [backend]
+    depends_on:
+      postgres: { condition: service_healthy }
+      mosquitto: { condition: service_healthy }
+    mem_limit: 64m
+    cpus: 0.5
+    pids_limit: 16
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/healthy -mmin -1 2>/dev/null)\""]
+      start_period: 30s
+
+  # PLACEHOLDER : à remplacer par le code de l'équipe DEV (garder /health et le port 8000).
+  api:
+    <<: *hardening
+    build: ./api
+    image: sentinel/api:0.1.0-placeholder
+    ports:
+      - "${API_BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-sentinel}
+      PGUSER: sentinel_app
+      PGPASSWORD: ${SENTINEL_APP_PASSWORD:?}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "8883"
+      MQTT_CAFILE: /certs/ca.crt
+      MQTT_USERNAME: api
+      MQTT_PASSWORD: ${MQTT_PASS_API:?}
+    volumes:
+      - { type: bind, source: ./mosquitto/certs/ca.crt, target: /certs/ca.crt, read_only: true, bind: { create_host_path: false } }
+    tmpfs:
+      - /tmp:size=8m
+    networks: [frontend, backend]
+    depends_on:
+      postgres: { condition: service_healthy }
+      mosquitto: { condition: service_healthy }
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
+      start_period: 15s
+
+networks:
+  # Réseau interne : pas de route vers l'extérieur (DB + ingestor).
+  backend:
+    internal: true
+  # Réseau exposé : seuls Mosquitto (8883) et l'API publient un port.
+  frontend: {}
+
+volumes:
+  pgdata:
