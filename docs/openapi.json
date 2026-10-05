@@ -3,7 +3,7 @@
   "info": {
     "title": "API SENTINEL-X",
     "description": "Supervision du module ESP32 SENTINEL-X : alertes, télémétrie, contrôle d'accès RFID, commandes moteurs/alarme. Authentification : `Authorization: Bearer <jeton>`.",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "paths": {
     "/api/v1/alerts": {
@@ -115,6 +115,23 @@
                 }
               ],
               "title": "Acknowledged"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
             }
           },
           {
@@ -382,6 +399,180 @@
         }
       }
     },
+    "/api/v1/telemetry/aggregate": {
+      "get": {
+        "tags": [
+          "télémétrie"
+        ],
+        "summary": "Telemetry Aggregate",
+        "description": "Agrégats par intervalle régulier (≈ `points` intervalles) + résumé sur toute la période.\n\nPour l'analyse sur de longues périodes sans transférer chaque mesure (défaut : dernière heure).",
+        "operationId": "telemetry_aggregate_api_v1_telemetry_aggregate_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "SENTINEL-X-CORE",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "name": "points",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 10,
+              "default": 300,
+              "title": "Points"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryAggregate"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/telemetry.csv": {
+      "get": {
+        "tags": [
+          "télémétrie"
+        ],
+        "summary": "Telemetry Csv",
+        "description": "Export CSV brut de la période (31 jours max), diffusé en flux (COPY) : mémoire constante côté Pi.",
+        "operationId": "telemetry_csv_api_v1_telemetry_csv_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "SENTINEL-X-CORE",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/access/events": {
       "get": {
         "tags": [
@@ -395,6 +586,23 @@
           }
         ],
         "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
           {
             "name": "limit",
             "in": "query",
@@ -1441,6 +1649,175 @@
         "title": "OperateMotor",
         "description": "03_SPECIFICATION § 2.A."
       },
+      "TelemetryAggregate": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "until": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Until"
+          },
+          "bucket_s": {
+            "type": "integer",
+            "title": "Bucket S"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TelemetryStats"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "since",
+          "until",
+          "bucket_s",
+          "summary",
+          "buckets"
+        ],
+        "title": "TelemetryAggregate"
+      },
+      "TelemetryBucket": {
+        "properties": {
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          },
+          "temperature_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Avg"
+          },
+          "temperature_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Min"
+          },
+          "temperature_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Max"
+          },
+          "humidity_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Avg"
+          },
+          "humidity_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Min"
+          },
+          "humidity_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Max"
+          },
+          "gas_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Avg"
+          },
+          "gas_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Max"
+          },
+          "presence_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presence Ratio"
+          },
+          "bucket": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Bucket"
+          }
+        },
+        "type": "object",
+        "required": [
+          "samples",
+          "temperature_avg",
+          "temperature_min",
+          "temperature_max",
+          "humidity_avg",
+          "humidity_min",
+          "humidity_max",
+          "gas_avg",
+          "gas_max",
+          "presence_ratio",
+          "bucket"
+        ],
+        "title": "TelemetryBucket"
+      },
       "TelemetryOut": {
         "properties": {
           "id": {
@@ -1619,6 +1996,127 @@
           "free_heap_bytes"
         ],
         "title": "TelemetryOut"
+      },
+      "TelemetryStats": {
+        "properties": {
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          },
+          "temperature_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Avg"
+          },
+          "temperature_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Min"
+          },
+          "temperature_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Max"
+          },
+          "humidity_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Avg"
+          },
+          "humidity_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Min"
+          },
+          "humidity_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Max"
+          },
+          "gas_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Avg"
+          },
+          "gas_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Max"
+          },
+          "presence_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presence Ratio"
+          }
+        },
+        "type": "object",
+        "required": [
+          "samples",
+          "temperature_avg",
+          "temperature_min",
+          "temperature_max",
+          "humidity_avg",
+          "humidity_min",
+          "humidity_max",
+          "gas_avg",
+          "gas_max",
+          "presence_ratio"
+        ],
+        "title": "TelemetryStats"
       },
       "TriggerAlarm": {
         "properties": {

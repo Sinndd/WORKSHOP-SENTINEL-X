@@ -1,8 +1,9 @@
-# API SENTINEL-X — référence (v2.0.0)
+# API SENTINEL-X — référence (v2.1.0)
 
 API REST du PC Serveur Local (Raspberry Pi) : alertes, télémétrie, contrôle d'accès RFID et commandes
 superviseur du module ESP32. Code dans [`api/`](../api), schémas dans [`api/app/models.py`](../api/app/models.py).
 
+- **Tableau de bord d'analyse** (React) : `http://192.168.10.1:8000/dashboard/` (§ 9)
 - **Documentation interactive** (essayer les requêtes depuis le navigateur) : `http://192.168.10.1:8000/docs`
 - **Spécification OpenAPI** générée depuis le code : [`docs/openapi.json`](openapi.json) (§ 9 pour la régénérer)
 - **Contrat MQTT** (topics et messages de l'ESP32) : [`docs/CONTRAT-MQTT.md`](CONTRAT-MQTT.md)
@@ -69,12 +70,15 @@ inconnus sont ignorés.
 |---|---|---|---|
 | GET | `/health` | — | vivacité (healthcheck Docker) |
 | GET | `/ready` | — | base de données + broker MQTT joignables |
+| GET | `/dashboard/` | — (données : opérateur) | tableau de bord React |
 | **POST** | **`/api/v1/alerts`** | appareil ou opérateur | **créer une alerte (ESP32)** |
 | GET | `/api/v1/alerts` | opérateur | lister les alertes (filtres) |
 | POST | `/api/v1/alerts/{id}/ack` | opérateur | acquitter une alerte |
 | GET | `/api/v1/devices` | opérateur | nœuds ESP32 et dernier contact |
 | GET | `/api/v1/telemetry/latest` | opérateur | dernière mesure d'un nœud |
-| GET | `/api/v1/telemetry` | opérateur | historique (dashboard, IA) |
+| GET | `/api/v1/telemetry` | opérateur | historique brut (dashboard, IA) |
+| GET | `/api/v1/telemetry/aggregate` | opérateur | agrégats par intervalle + résumé de période |
+| GET | `/api/v1/telemetry.csv` | opérateur | export CSV brut d'une période |
 | GET | `/api/v1/access/events` | opérateur | journal des passages de badge |
 | GET | `/api/v1/badges` | opérateur | badges enregistrés |
 | PUT | `/api/v1/badges/{card_uid}` | opérateur | créer / modifier un badge |
@@ -124,7 +128,7 @@ http.end();
 ### `GET /api/v1/alerts` — lister
 
 Paramètres (facultatifs) : `node_id`, `severity` (`INFO`|`WARNING`|`CRITICAL`), `acknowledged` (`true`|`false`),
-`limit` (1–1000, défaut 100). Tri : plus récentes d'abord.
+`since` (ISO 8601), `limit` (1–1000, défaut 100). Tri : plus récentes d'abord.
 
 ```bash
 curl "$API/api/v1/alerts?acknowledged=false&severity=CRITICAL" -H "Authorization: Bearer $API_TOKEN"
@@ -173,6 +177,38 @@ paginer en reculant `until`.
 
 ```bash
 curl "$API/api/v1/telemetry?since=2026-10-05T14:00:00%2B02:00&limit=1000" -H "Authorization: Bearer $API_TOKEN"
+```
+
+### `GET /api/v1/telemetry/aggregate` — analyse sur une période
+
+Découpe la période en environ `points` intervalles réguliers. Renvoie pour chacun moyenne, min et max de la température et de
+l'humidité, moyenne et pic du gaz, et la part des mesures avec présence. S'y ajoute un `summary` sur toute la période. C'est ce
+qu'utilise le tableau de bord : 7 jours de mesures toutes les 2 s (≈ 300 000 lignes) donnent 300 points.
+
+Paramètres : `node_id` (défaut `SENTINEL-X-CORE`), `since` (défaut : `until` − 1 h), `until` (défaut : maintenant),
+`points` (10–1000, défaut 300). Période de 31 jours maximum, sinon `422`.
+
+```bash
+curl "$API/api/v1/telemetry/aggregate?since=2026-10-05T13:00:00Z&points=24" -H "Authorization: Bearer $API_TOKEN"
+```
+
+```json
+{"node_id": "SENTINEL-X-CORE", "since": "2026-10-05T13:00:00Z", "until": "2026-10-05T15:00:00Z", "bucket_s": 300,
+ "summary": {"samples": 638, "temperature_avg": 24.26, "temperature_min": 21.0, "temperature_max": 30.5,
+             "humidity_avg": 52.05, "humidity_min": 40.0, "humidity_max": 54.5, "gas_avg": 442.8, "gas_max": 4095,
+             "presence_ratio": 0.171},
+ "buckets": [{"bucket": "2026-10-05T13:00:00Z", "samples": 30, "temperature_avg": 23.9, "...": "..."}]}
+```
+
+Un intervalle sans aucune mesure est **absent** de `buckets` (module hors ligne) : il ne vaut pas zéro.
+
+### `GET /api/v1/telemetry.csv` — export brut
+
+Mêmes paramètres `node_id`, `since` et `until` (31 jours max). Toutes les colonnes de la télémétrie, triées par date. Le
+fichier est produit en flux (`COPY` PostgreSQL), donc la mémoire reste constante sur le Pi quelle que soit la période.
+
+```bash
+curl -o telemetry.csv "$API/api/v1/telemetry.csv?since=2026-10-05T00:00:00Z" -H "Authorization: Bearer $API_TOKEN"
 ```
 
 ### `GET /api/v1/devices`
@@ -232,7 +268,7 @@ curl -X PUT $API/api/v1/badges/A3:5F:B2:1C -H "Authorization: Bearer $API_TOKEN"
 
 Passe le badge à `active: false`. Il est conservé pour l'historique des passages. Renvoie `404` si l'UID est inconnu.
 
-### `GET /api/v1/badges` et `GET /api/v1/access/events?limit=100`
+### `GET /api/v1/badges` et `GET /api/v1/access/events?since=…&limit=100`
 
 ```json
 [{"id": 7, "node_id": "SENTINEL-X-CORE", "ts": "2026-10-05T14:27:10.908113+02:00",
@@ -304,7 +340,28 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 
 ---
 
-## 9. Développement
+## 9. Tableau de bord
+
+`http://192.168.10.1:8000/dashboard/` : page React servie par l'API elle-même, sans conteneur ni ressource externe. Elle
+fonctionne donc sur le Wi-Fi de la table, même sans Internet. Au premier accès, la page demande le jeton `API_TOKEN`,
+conservé uniquement pour l'onglet (`sessionStorage`).
+
+| Zone | Contenu |
+|---|---|
+| En-tête | état du module (en ligne si un message a été reçu il y a moins de 15 s), heure de mise à jour |
+| Filtres | période (15 min, 1 h, 6 h, 24 h, 7 jours), actualisation automatique toutes les 10 s, export CSV brut |
+| Indicateurs | valeur actuelle + min/moy/max de la période : température, humidité, gaz, présence, alertes non acquittées, Wi-Fi |
+| Actionneurs | sas, vanne gaz, barrière, ventilation, alarme (dernier état transmis) |
+| Courbes | température, humidité, pic de gaz, présence (% du temps). Curseur synchronisé sur les 4 courbes, flèches ← → au clavier ; une coupure dans la courbe signale un module hors ligne |
+| Données | tableau des intervalles agrégés (les mêmes valeurs que les courbes) |
+| Alertes | répartition par type, liste filtrable, bouton **Acquitter** |
+| Accès RFID | passages accordés et refusés |
+| Commandes | historique des ordres envoyés à l'ESP32 |
+
+Thème clair ou sombre selon le système, mise en page adaptée au téléphone. Code dans [`dashboard/`](../dashboard)
+(Vite + React + TypeScript, graphiques SVG sans bibliothèque). L'image Docker de l'API le compile au build.
+
+## 10. Développement
 
 | Tâche | Commande |
 |---|---|
@@ -312,7 +369,8 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 | Journaux | `docker compose logs -f api` |
 | Tests unitaires (sans base) | voir l'en-tête de [`api/tests/test_api.py`](../api/tests/test_api.py) |
 | Test de bout en bout | `./scripts/smoke-test.sh` (32 vérifications, dont tout le circuit RFID) |
-| Régénérer `docs/openapi.json` | `docker run --rm -e API_TOKEN=x -e API_DEVICE_TOKEN=x -e MQTT_PASSWORD=x sentinel/api:2.0.0 python -c "import json; from app.main import app; print(json.dumps(app.openapi(), ensure_ascii=False, indent=2))" > docs/openapi.json` |
+| Tableau de bord en direct (rechargement à chaud) | `cd dashboard && npm install && API_URL=http://192.168.10.1:8000 npm run dev` puis `http://localhost:5173/dashboard/` |
+| Régénérer `docs/openapi.json` | `docker run --rm -e API_TOKEN=x -e API_DEVICE_TOKEN=x -e MQTT_PASSWORD=x sentinel/api:2.1.0 python -c "import json; from app.main import app; print(json.dumps(app.openapi(), ensure_ascii=False, indent=2))" > docs/openapi.json` |
 
 Organisation du code :
 
@@ -324,7 +382,13 @@ Organisation du code :
 | `app/mqtt_bridge.py` | décision d'accès RFID, publication des commandes |
 | `app/security.py` | jetons Bearer (comparaison en temps constant) |
 | `app/db.py` | pool psycopg (4 connexions max, rôle `sentinel_app`) |
+| `../dashboard/src/` | tableau de bord : `App.tsx` (pages, filtres), `components/LineChart.tsx` (courbes SVG), `api.ts` |
 
 Contraintes du conteneur à respecter lors d'une évolution : utilisateur non-root, système de fichiers en lecture
 seule (`/tmp` seul inscriptible), port 8000, route `/health` conservée, `mem_limit: 128m`. La consommation mesurée
 est de 44 Mo.
+
+Le contexte de build de l'API est la **racine du dépôt** (pour inclure `dashboard/`). Le fichier `.dockerignore` racine est une
+liste blanche : il n'envoie que `api/` et `dashboard/`, jamais `.env` ni les certificats. Sur le Pi 3, la compilation du
+tableau de bord dure quelques minutes ; on peut aussi construire l'image sur un poste arm64 (Mac Apple Silicon) puis la
+transférer : `docker save sentinel/api:2.1.0 | ssh pi docker load`.

@@ -12,7 +12,8 @@ Le Pi sert aussi de point d'accès Wi-Fi 2.4 GHz (`wlan0`, 192.168.10.0/24) et e
 
 Documentation :
 - **[docs/CONTRAT-MQTT.md](docs/CONTRAT-MQTT.md)** : contrat MQTT v2 (source de vérité ESP32 ↔ serveur) ;
-- **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `:8000/docs`).
+- **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `:8000/docs`) ;
+- **tableau de bord d'analyse** (React) : `http://192.168.10.1:8000/dashboard/` (jeton `API_TOKEN`).
 
 ---
 
@@ -57,7 +58,7 @@ flowchart LR
   subgraph Docker["Docker (Raspberry Pi)"]
     subgraph FE["réseau frontend"]
       MQ["mosquitto<br/>:8883 publié"]
-      API["api FastAPI<br/>:8000 publié"]
+      API["api FastAPI + dashboard React<br/>:8000 publié"]
     end
     subgraph BE["réseau backend (internal: true)"]
       ING["ingestor"]
@@ -75,7 +76,7 @@ flowchart LR
 | `mosquitto` | `eclipse-mosquitto:2.1.2-alpine` | frontend, backend | **8883/tcp** (MQTTS) | UID de l'hôte (`PUID`) | 32 Mo |
 | `postgres` | `postgres:17.11-alpine3.24` | backend | — | `70` (postgres) | 160 Mo |
 | `ingestor` | build `./ingestor` (`python:3.13.16-alpine3.24`) | backend | — | `10001` | 64 Mo |
-| `api` | build `./api` (FastAPI, `python:3.13.16-alpine3.24`) | frontend, backend | **8000/tcp** | `10002` | 128 Mo |
+| `api` | build `api/Dockerfile` (FastAPI + dashboard React compilé, `python:3.13.16-alpine3.24`) | frontend, backend | **8000/tcp** | `10002` | 128 Mo |
 
 - **backend** est `internal: true`, donc sans route vers l'extérieur. Mosquitto et l'API y sont aussi rattachés pour joindre la base et l'ingestor.
 - **frontend** porte les deux seuls ports publiés. **PostgreSQL n'est jamais publié.**
@@ -269,7 +270,7 @@ docker compose logs --tail 50 mosquitto       # connexions, refus d'authentifica
 | Équipe | Ce qu'il faut récupérer |
 |---|---|
 | **Firmware ESP32** | `mosquitto/certs/ca_cert.h` (généré sur le Pi), `MQTT_PASS_ESP32` et `API_DEVICE_TOKEN` du `.env` (à mettre dans un `secrets.h` non versionné). **Adaptations obligatoires du firmware `04`** (TLS 8883, authentification, tampon de 1024 octets, traitement des commandes, pont diviseur du capteur MQ) : [contrat § 6](docs/CONTRAT-MQTT.md). |
-| **API / Dashboard (DEV)** | [docs/API.md](docs/API.md) et `http://192.168.10.1:8000/docs`. Jeton `API_TOKEN`. Pour faire évoluer l'API : code dans `api/app/`, contraintes du conteneur en fin de `docs/API.md`. |
+| **API / Dashboard (DEV)** | [docs/API.md](docs/API.md), `http://192.168.10.1:8000/docs` et le tableau de bord `/dashboard/` (code dans `dashboard/`). Jeton `API_TOKEN`. Pour faire évoluer l'API : code dans `api/app/`, contraintes du conteneur en fin de `docs/API.md`. |
 | **IA** | Historique de la télémétrie : `GET /api/v1/telemetry` (jeton `API_TOKEN`). Caméra : MQTTS vers `127.0.0.1:8883` ou `192.168.10.1:8883`, compte `vision`, CA `mosquitto/certs/ca.crt`, topic `sentinel/vision/events` ([contrat § 7](docs/CONTRAT-MQTT.md)). |
 
 Changer un mot de passe ou un jeton : modifier la valeur dans `.env`, relancer `./scripts/gen-env.sh` (régénère `passwd`),
@@ -315,6 +316,7 @@ Mise en œuvre prévue (sur demande) : un fichier `docker-compose.sqlite.yml` qu
 │   └── 02-roles.sh             # sentinel_app / sentinel_ro
 ├── ingestor/                   # MQTT -> PostgreSQL (validation, lots, reconnexion) + tests
 ├── api/                        # API FastAPI (app/ : routes, modèles, pont MQTT RFID/commandes) + tests
+├── dashboard/                  # tableau de bord React (Vite + TS), compilé dans l'image de l'API
 ├── scripts/
 │   ├── gen-env.sh  gen-certs.sh             # secrets et PKI
 │   ├── setup-pi.sh  harden-host.sh          # préparation et durcissement de l'hôte (--dry-run)
