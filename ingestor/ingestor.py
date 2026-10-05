@@ -1,8 +1,9 @@
 """Ingestion MQTT (TLS) -> PostgreSQL pour SENTINEL-X.
 
 - Thread réseau paho (loop_start) : reçoit, horodate (received_at) et met en file.
-- Thread principal : valide puis écrit en base ; en cas de panne PostgreSQL il
-  réessaie le même message avec backoff sans bloquer le keepalive MQTT.
+- Thread principal : valide puis écrit en base par lots (une transaction pour
+  jusqu'à BATCH_MAX messages) ; en cas de panne PostgreSQL il réessaie le même
+  lot avec backoff sans bloquer le keepalive MQTT.
 - Session persistante (clean_session=False) : les messages QoS 1 (alertes,
   status, vision) sont conservés par le broker pendant un redémarrage de l'ingestor.
 - /tmp/healthy est touché tant que MQTT est connecté et que la base répond.
@@ -31,7 +32,8 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", "8883"))
 MQTT_CAFILE = os.environ.get("MQTT_CAFILE", "/certs/ca.crt")
 MQTT_USER = os.environ.get("MQTT_USERNAME", "ingestor")
 MQTT_PASS = os.environ["MQTT_PASSWORD"]
-QUEUE_MAX = int(os.environ.get("QUEUE_MAX", "1000"))
+QUEUE_MAX = int(os.environ.get("QUEUE_MAX", "2000"))
+BATCH_MAX = int(os.environ.get("BATCH_MAX", "200"))
 STATS_EVERY_S = int(os.environ.get("STATS_EVERY_S", "300"))
 HEALTH_FILE = pathlib.Path(os.environ.get("HEALTH_FILE", "/tmp/healthy"))
 
@@ -69,6 +71,7 @@ class Ingestor:
         self.mqtt_ok = threading.Event()
         self.db = None
         self.last_db_ok = 0.0
+        self.last_drop_log = 0.0
         self.stats = {"received": 0, "stored": 0, "rejected": 0, "dropped": 0}
 
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sentinel-ingestor",
@@ -101,7 +104,10 @@ class Ingestor:
             self.inbox.put_nowait((msg.topic, msg.payload, datetime.now(timezone.utc)))
         except queue.Full:
             self.stats["dropped"] += 1
-            log.error("file pleine (%d), message perdu sur %s", QUEUE_MAX, msg.topic)
+            now = time.monotonic()
+            if now - self.last_drop_log > 10:  # une ligne max toutes les 10 s (carte SD)
+                self.last_drop_log = now
+                log.error("file pleine (%d) : %d message(s) perdu(s) au total", QUEUE_MAX, self.stats["dropped"])
 
     # --- Base de données ---------------------------------------------------------
     def db_conn(self):
@@ -111,37 +117,47 @@ class Ingestor:
             log.info("connecté à PostgreSQL %s/%s", os.environ.get("PGHOST"), os.environ.get("PGDATABASE"))
         return self.db
 
-    def store(self, kind, device_id, d, raw, received_at):
-        conn = self.db_conn()
-        with conn.transaction():
-            if kind == "telemetry":
-                conn.execute(SQL_TOUCH_DEVICE, (device_id, received_at))
-                conn.execute(SQL_READING, (device_id, d["ts"], received_at, d["seq"], d["temperature_c"],
-                                           d["humidity_pct"], d["gas_raw"], d["motion"], d["rssi_dbm"],
-                                           d["uptime_s"]))
-            elif kind == "status":
-                conn.execute(SQL_STATUS, (device_id, received_at, d["state"], d["ip"], d["fw"]))
-            elif kind == "alerts":
-                conn.execute(SQL_ENSURE_DEVICE, (device_id,))
-                conn.execute(SQL_ALERT, (device_id, d["ts"], received_at, d["type"], d["severity"],
-                                         d["value"], d["threshold"], d["message"], Jsonb(raw)))
-            else:
-                conn.execute(SQL_VISION, (d["ts"], received_at, d["label"], d["confidence"], Jsonb(d["bbox"]),
-                                          d["frame_w"], d["frame_h"], d["snapshot_path"]))
-        self.last_db_ok = time.monotonic()
+    @staticmethod
+    def store(conn, kind, device_id, d, raw, received_at):
+        if kind == "telemetry":
+            conn.execute(SQL_TOUCH_DEVICE, (device_id, received_at))
+            conn.execute(SQL_READING, (device_id, d["ts"], received_at, d["seq"], d["temperature_c"],
+                                       d["humidity_pct"], d["gas_raw"], d["motion"], d["rssi_dbm"],
+                                       d["uptime_s"]))
+        elif kind == "status":
+            conn.execute(SQL_STATUS, (device_id, received_at, d["state"], d["ip"], d["fw"]))
+        elif kind == "alerts":
+            conn.execute(SQL_ENSURE_DEVICE, (device_id,))
+            conn.execute(SQL_ALERT, (device_id, d["ts"], received_at, d["type"], d["severity"],
+                                     d["value"], d["threshold"], d["message"], Jsonb(raw)))
+        else:
+            conn.execute(SQL_VISION, (d["ts"], received_at, d["label"], d["confidence"], Jsonb(d["bbox"]),
+                                      d["frame_w"], d["frame_h"], d["snapshot_path"]))
 
-    def handle(self, topic, payload, received_at):
-        try:
-            kind, device_id, data, raw = validate(topic, payload)
-        except ValidationError as exc:
-            self.stats["rejected"] += 1
-            log.warning("rejeté %s: %s | %r", topic, exc, payload[:200])
-            return
+    def handle(self, items):
+        batch = []
+        for topic, payload, received_at in items:
+            try:
+                kind, device_id, data, raw = validate(topic, payload)
+            except ValidationError as exc:
+                self.stats["rejected"] += 1
+                log.warning("rejeté %s: %s | %r", topic, exc, payload[:200])
+                continue
+            batch.append((kind, device_id, data, raw, received_at, topic, payload))
+        if batch:
+            self.write(batch)
+
+    def write(self, batch):
+        """Écrit un lot en une transaction ; réessaie tant que la base est indisponible."""
         delay = 1
         while not self.stop.is_set():
             try:
-                self.store(kind, device_id, data, raw, received_at)
-                self.stats["stored"] += 1
+                conn = self.db_conn()
+                with conn.transaction(), conn.pipeline():  # pipeline : un seul aller-retour par lot
+                    for kind, device_id, data, raw, received_at, _, _ in batch:
+                        self.store(conn, kind, device_id, data, raw, received_at)
+                self.stats["stored"] += len(batch)
+                self.last_db_ok = time.monotonic()
                 return
             except psycopg.OperationalError as exc:
                 log.error("PostgreSQL indisponible (%s), nouvel essai dans %ds", str(exc).strip(), delay)
@@ -150,8 +166,13 @@ class Ingestor:
                 self.stop.wait(delay)
                 delay = min(delay * 2, 30)
             except psycopg.Error as exc:
+                if len(batch) > 1:  # un message fautif annule le lot : on rejoue un par un pour l'isoler
+                    for item in batch:
+                        self.write([item])
+                    return
                 # Erreur de données (contrainte, FK...) : on ne bloque pas la file pour un message.
                 self.stats["rejected"] += 1
+                topic, payload = batch[0][5], batch[0][6]
                 log.warning("rejeté par la base %s: %s | %r", topic, exc.diag.message_primary or exc, payload[:200])
                 return
 
@@ -174,10 +195,15 @@ class Ingestor:
         self.client.loop_start()
         next_stats = time.monotonic() + STATS_EVERY_S
         while not self.stop.is_set():
+            items = []
             try:
-                self.handle(*self.inbox.get(timeout=5))
+                items = [self.inbox.get(timeout=5)]
+                while len(items) < BATCH_MAX:
+                    items.append(self.inbox.get_nowait())
             except queue.Empty:
                 pass
+            if items:
+                self.handle(items)
             self.heartbeat()
             if time.monotonic() >= next_stats:
                 log.info("stats %s file=%d", json.dumps(self.stats), self.inbox.qsize())
