@@ -33,7 +33,7 @@ else
 fi
 
 # 2. Génération de l'environnement sécurisé (.env)
-if [[ ! -f .env ]]; then
+if [[ ! -f .env || ! -f mosquitto/secrets/passwd ]]; then
   echo -e "${YELLOW}[1/4] Génération des secrets cryptographiques (.env)...${NC}"
   ./scripts/gen-env.sh
 else
@@ -60,6 +60,13 @@ echo -e "${GREEN}✓ Dashboard prêt.${NC}"
 
 # 5. Lancement de la stack Docker durcie
 echo -e "${BLUE}[4/4] Démarrage de la stack de conteneurs isolés...${NC}"
+# PostgreSQL d'abord : les migrations (comptes, sessions, journal de sécurité) doivent précéder l'API.
+$DOCKER_CMD up -d postgres
+for _ in $(seq 1 30); do
+  $DOCKER_CMD exec -T postgres sh -c 'pg_isready -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"' && break
+  sleep 2
+done
+./scripts/migrate-db.sh
 $DOCKER_CMD up -d --build
 
 echo -e "\n${GREEN}======================================================================${NC}"
@@ -68,6 +75,7 @@ echo -e "${GREEN}===============================================================
 echo -e "🌐 Dashboard Tactique   : ${BLUE}http://localhost:8000/dashboard/${NC}"
 echo -e "📄 Documentation API    : ${BLUE}http://localhost:8000/docs${NC}"
 echo -e "🔒 Broker MQTTS         : ${BLUE}port 8883 (TLS 1.2+ obligatoire)${NC}"
-echo -e "👤 Utilisateur par défaut : ${YELLOW}admin${NC} | Mot de passe : ${YELLOW}sentinel2026${NC}"
+echo -e "👤 Premier accès         : compte ${YELLOW}admin${NC} (DASHBOARD_USER), mot de passe temporaire = DASHBOARD_PASS dans .env"
+echo -e "   Changement de mot de passe imposé à la 1re connexion, puis créez les comptes dans l'onglet Utilisateurs."
 echo -e "\nPour voir l'état des services : ${YELLOW}./scripts/status.sh${NC}"
 echo -e "Pour suivre les journaux      : ${YELLOW}$DOCKER_CMD logs -f${NC}"

@@ -86,3 +86,70 @@ export interface CommandLog {
   action: string | null;
   payload: Record<string, unknown>;
 }
+
+// --- Comptes et sécurité ---
+export type Role = "viewer" | "operator" | "admin";
+
+export interface Me {
+  username: string;
+  full_name: string;
+  role: Role;
+  service: boolean;
+  must_change_password: boolean;
+  totp_enabled: boolean;
+  last_login_at?: string | null;
+  last_login_ip?: string | null;
+}
+
+export interface UserRow {
+  id: number;
+  username: string;
+  full_name: string;
+  role: Role;
+  active: boolean;
+  must_change_password: boolean;
+  totp_enabled: boolean;
+  locked_until: string | null;
+  failed_attempts: number;
+  last_login_at: string | null;
+  last_login_ip: string | null;
+  created_at: string;
+  created_by: string | null;
+  active_sessions?: number;
+  temporary_password?: string | null;
+}
+
+export interface SessionRow {
+  id: number;
+  username?: string;
+  full_name?: string;
+  created_at: string;
+  last_seen: string;
+  expires_at: string;
+  ip: string | null;
+  user_agent: string | null;
+  current?: boolean;
+}
+
+export interface SecurityEvent {
+  id: number;
+  ts: string;
+  event_type: string;
+  severity: Severity;
+  username: string | null;
+  actor: string | null;
+  ip: string | null;
+  user_agent: string | null;
+  details: string | null;
+}
+
+export interface SecuritySummary {
+  failures_24h: number;
+  intrusions_24h: number;
+  logins_24h: number;
+  locked_accounts: number;
+  active_sessions: number;
+  blocked_ips: number;
+}
+
+export interface BlockedIp { ip: string; remaining_s: number; }

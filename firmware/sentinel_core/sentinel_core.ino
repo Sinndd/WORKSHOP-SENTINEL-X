@@ -25,6 +25,33 @@ int gasRaw = 0;
 bool presenceDetected = false;
 bool lastPresenceState = false;
 
+// --- PIR HC-SR501 : chauffe + filtrage (le brut du module est bruité) ---
+const unsigned long PIR_WARMUP_MS = 60000;          // sortie instable ~1 min après la mise sous tension
+const uint8_t       PIR_ON_SAMPLES = 4;             // 4 lectures HIGH consécutives (4 x 50 ms) pour valider
+const unsigned long PIR_HOLD_LOW_MS = 1500;         // LOW stable 1,5 s avant de repasser à « aucune présence »
+const unsigned long PIR_ALERT_COOLDOWN_MS = 10000;  // une alerte INTRUSION au plus toutes les 10 s
+
+bool pirWarmingUp() { return millis() < PIR_WARMUP_MS; }
+
+// Appelée à chaque tour de loop() : met à jour presenceDetected à partir de la sortie brute du module.
+void updatePir() {
+  static unsigned long lastSample = 0, lowSince = 0;
+  static uint8_t highCount = 0;
+  unsigned long now = millis();
+  if (now - lastSample < 50) return;
+  lastSample = now;
+  if (pirWarmingUp()) { presenceDetected = false; return; }
+  if (digitalRead(PIN_PIR) == HIGH) {
+    lowSince = 0;
+    if (highCount < 255) highCount++;
+    if (highCount >= PIR_ON_SAMPLES) presenceDetected = true;
+  } else {
+    highCount = 0;
+    if (lowSince == 0) lowSince = now;
+    if (presenceDetected && now - lowSince >= PIR_HOLD_LOW_MS) presenceDetected = false;
+  }
+}
+
 bool airlockOpen = false;
 bool alarmActive = false;
 bool localGasAlarm = false;
@@ -72,8 +99,12 @@ void connectWiFi() {
   }
 }
 
+// BearSSL vérifie les dates du certificat : sans heure valide (NTP du serveur, pas d'Internet sur la table),
+// le handshake échoue et bloque la boucle. On attend donc l'heure avant de tenter le TLS.
+static bool timeIsValid() { return time(nullptr) > 1735689600; }   // après le 01/01/2025
+
 void connectMQTT() {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (WiFi.status() != WL_CONNECTED || !timeIsValid()) return;
   Serial.println(F("[MQTTS] Connexion TLS port 8883..."));
   
   if (mqttClient.connect(NODE_ID, MQTT_USER, MQTT_PASS)) {
@@ -156,9 +187,10 @@ void readSensors() {
     lastGasWarning = false;
   }
 
-  // 2. DÉTECTION PRÉSENCE PIR
-  presenceDetected = (digitalRead(PIN_PIR) == HIGH);
-  if (presenceDetected && !lastPresenceState) {
+  // 2. DÉTECTION PRÉSENCE PIR (valeur filtrée par updatePir())
+  static unsigned long lastPirAlert = 0;
+  if (presenceDetected && !lastPresenceState && (lastPirAlert == 0 || millis() - lastPirAlert >= PIR_ALERT_COOLDOWN_MS)) {
+    lastPirAlert = millis();
     sendAlertMQTT("INTRUSION_DETECTED", "CRITICAL", "PIR_MOTION", 1.0, "Mouvement anormal detecte dans le perimetre");
   }
   lastPresenceState = presenceDetected;
@@ -257,7 +289,7 @@ void updateDisplay() {
 
   // Ligne 4 : Gaz & Présence
   display.setCursor(0, 36);
-  display.printf("Gaz:%-4d PIR:%s", gasRaw, presenceDetected ? "!MVT!" : "OK");
+  display.printf("Gaz:%-4d PIR:%s", gasRaw, pirWarmingUp() ? "CHAUF" : (presenceDetected ? "!MVT!" : "OK"));
 
   // Ligne 5 : État Alarme & Compteur MQTTS
   display.setCursor(0, 48);
@@ -313,15 +345,19 @@ void loop() {
     }
   } else {
     if (!mqttClient.connected()) {
-      static unsigned long lastTlsRetry = 0;
-      if (millis() - lastTlsRetry > 4000) {
+      // Délai croissant (4 s -> 60 s) : un handshake TLS bloque la boucle (capteurs, alarme locale) pendant ~1-3 s.
+      static unsigned long lastTlsRetry = 0, tlsBackoff = 4000;
+      if (millis() - lastTlsRetry > tlsBackoff) {
         lastTlsRetry = millis();
         connectMQTT();
+        tlsBackoff = mqttClient.connected() ? 4000 : min(tlsBackoff * 2, 60000UL);
       }
     } else {
       mqttClient.loop();
     }
   }
+
+  updatePir();
 
   // Animation physique immédiate de l'alarme (Buzzer + LED Rouge clignotante)
   updateAlarmActuators();

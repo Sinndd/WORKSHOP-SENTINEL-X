@@ -3,7 +3,6 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-import secrets
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import Response as RawResponse, StreamingResponse
 from psycopg import sql
@@ -12,10 +11,10 @@ from psycopg.types.json import Jsonb
 from . import config
 from .db import SQL_ENSURE_DEVICE, pool
 from .models import (CARD_UID_RE, AccessEventOut, AirlockAction, AlarmAction, AlertIn, AlertOut, BadgeIn, BadgeOut,
-                     Command, CommandOut, DeviceOut, LoginRequest, LoginResponse, Severity, TelemetryAggregate,
+                     Command, CommandOut, DeviceOut, Severity, TelemetryAggregate,
                      TelemetryOut, VisionEventOut, resolve_ts)
 from .mqtt_bridge import bridge
-from .security import require_device_or_operator, require_operator
+from .auth import client_ip, rate_limited, require_device_or_operator, require_operator, require_viewer
 
 # Tampon mémoire RAM pour le dernier snapshot webcam (aucun impact I/O sur carte SD)
 _latest_snapshot: bytes | None = None
@@ -23,9 +22,14 @@ _latest_snapshot_ts: datetime | None = None
 
 router = APIRouter(prefix="/api/v1")
 operator = [Depends(require_operator)]
+viewer = [Depends(require_viewer)]   # lecture seule
 Limit = Annotated[int, Query(ge=1, le=1000)]
 CardUidPath = Annotated[str, Path(pattern=CARD_UID_RE.replace("[0-9A-F]", "[0-9A-Fa-f]"),
                                   examples=["A3:5F:B2:1C"])]
+
+NodeId = Annotated[str, Query(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")]   # même règle que la base
+MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+ALERTS_PER_MINUTE = 60            # par adresse : une alerte en boucle ne doit pas remplir la carte SD
 
 ALERT_COLUMNS = ("id, node_id, ts, received_at, event_type, severity, source_sensor, value, details, channel, "
                  "acknowledged, acknowledged_at")
@@ -34,8 +38,10 @@ ALERT_COLUMNS = ("id, node_id, ts, received_at, event_type, severity, source_sen
 # --- Alertes --------------------------------------------------------------------------------
 @router.post("/alerts", status_code=201, response_model=AlertOut, tags=["alertes"],
              dependencies=[Depends(require_device_or_operator)])
-def create_alert(alert: AlertIn):
+def create_alert(alert: AlertIn, request: Request):
     """Alerte critique émise par l'ESP32 (jeton d'appareil) ou saisie par un opérateur."""
+    if rate_limited(f"alerts:{client_ip(request)}", ALERTS_PER_MINUTE, 60):
+        raise HTTPException(429, "trop d'alertes : réessayez dans une minute", headers={"Retry-After": "60"})
     with pool.connection() as conn, conn.transaction():
         conn.execute(SQL_ENSURE_DEVICE, (alert.node_id,))
         return conn.execute(
@@ -46,8 +52,8 @@ def create_alert(alert: AlertIn):
              alert.source_sensor, alert.value, alert.details, Jsonb(alert.model_dump()))).fetchone()
 
 
-@router.get("/alerts", response_model=list[AlertOut], tags=["alertes"], dependencies=operator)
-def list_alerts(node_id: str | None = None, severity: Severity | None = None,
+@router.get("/alerts", response_model=list[AlertOut], tags=["alertes"], dependencies=viewer)
+def list_alerts(node_id: NodeId | None = None, severity: Severity | None = None,
                 acknowledged: bool | None = None, since: datetime | None = None, limit: Limit = 100):
     with pool.connection() as conn:
         return conn.execute(
@@ -72,14 +78,14 @@ def acknowledge_alert(alert_id: int):
 
 
 # --- Télémétrie et nœuds -------------------------------------------------------------------------
-@router.get("/devices", response_model=list[DeviceOut], tags=["télémétrie"], dependencies=operator)
+@router.get("/devices", response_model=list[DeviceOut], tags=["télémétrie"], dependencies=viewer)
 def list_devices():
     with pool.connection() as conn:
         return conn.execute("SELECT * FROM devices ORDER BY node_id").fetchall()
 
 
-@router.get("/telemetry/latest", response_model=TelemetryOut, tags=["télémétrie"], dependencies=operator)
-def latest_telemetry(node_id: str = "SENTINEL-X-CORE"):
+@router.get("/telemetry/latest", response_model=TelemetryOut, tags=["télémétrie"], dependencies=viewer)
+def latest_telemetry(node_id: NodeId = "SENTINEL-X-CORE"):
     with pool.connection() as conn:
         row = conn.execute("SELECT * FROM telemetry WHERE node_id = %s ORDER BY ts DESC, id DESC LIMIT 1",
                            (node_id,)).fetchone()
@@ -88,8 +94,8 @@ def latest_telemetry(node_id: str = "SENTINEL-X-CORE"):
     return row
 
 
-@router.get("/telemetry", response_model=list[TelemetryOut], tags=["télémétrie"], dependencies=operator)
-def telemetry_history(node_id: str = "SENTINEL-X-CORE", since: datetime | None = None,
+@router.get("/telemetry", response_model=list[TelemetryOut], tags=["télémétrie"], dependencies=viewer)
+def telemetry_history(node_id: NodeId = "SENTINEL-X-CORE", since: datetime | None = None,
                       until: datetime | None = None,
                       limit: Annotated[int, Query(ge=1, le=5000)] = 500):
     """Historique (plus récent d'abord) : dashboard et modèle IA de maintenance prédictive."""
@@ -120,8 +126,8 @@ def _range(since: datetime | None, until: datetime | None) -> tuple[datetime, da
     return since, until
 
 
-@router.get("/telemetry/aggregate", response_model=TelemetryAggregate, tags=["télémétrie"], dependencies=operator)
-def telemetry_aggregate(node_id: str = "SENTINEL-X-CORE", since: datetime | None = None,
+@router.get("/telemetry/aggregate", response_model=TelemetryAggregate, tags=["télémétrie"], dependencies=viewer)
+def telemetry_aggregate(node_id: NodeId = "SENTINEL-X-CORE", since: datetime | None = None,
                         until: datetime | None = None,
                         points: Annotated[int, Query(ge=10, le=1000)] = 300):
     """Agrégats par intervalle régulier (≈ `points` intervalles) + résumé sur toute la période.
@@ -141,9 +147,9 @@ def telemetry_aggregate(node_id: str = "SENTINEL-X-CORE", since: datetime | None
             "summary": summary, "buckets": buckets}
 
 
-@router.get("/telemetry.csv", tags=["télémétrie"], dependencies=operator,
+@router.get("/telemetry.csv", tags=["télémétrie"], dependencies=viewer,
             response_class=StreamingResponse, responses={200: {"content": {"text/csv": {}}}})
-def telemetry_csv(node_id: str = "SENTINEL-X-CORE", since: datetime | None = None, until: datetime | None = None):
+def telemetry_csv(node_id: NodeId = "SENTINEL-X-CORE", since: datetime | None = None, until: datetime | None = None):
     """Export CSV brut de la période (31 jours max), diffusé en flux (COPY) : mémoire constante côté Pi."""
     since, until = _range(since, until)
     query = sql.SQL("""COPY (SELECT ts, received_at, device_timestamp, uptime_ms, temperature_celsius,
@@ -163,7 +169,7 @@ def telemetry_csv(node_id: str = "SENTINEL-X-CORE", since: datetime | None = Non
 
 
 # --- Contrôle d'accès RFID ----------------------------------------------------------------------
-@router.get("/access/events", response_model=list[AccessEventOut], tags=["accès RFID"], dependencies=operator)
+@router.get("/access/events", response_model=list[AccessEventOut], tags=["accès RFID"], dependencies=viewer)
 def list_access_events(since: datetime | None = None, limit: Limit = 100):
     with pool.connection() as conn:
         return conn.execute(
@@ -225,31 +231,13 @@ def send_command(command: Annotated[Command, Body(openapi_examples={
     return {"id": command_id, "topic": config.TOPIC_COMMANDS, "payload": payload}
 
 
-@router.get("/commands", response_model=list[CommandOut], tags=["commandes"], dependencies=operator)
+@router.get("/commands", response_model=list[CommandOut], tags=["commandes"], dependencies=viewer)
 def list_commands(limit: Limit = 100):
     with pool.connection() as conn:
         return conn.execute("SELECT * FROM commands ORDER BY created_at DESC, id DESC LIMIT %s", (limit,)).fetchall()
 
 
 # --- Authentification Opérateur --------------------------------------------------------
-@router.post("/auth/login", response_model=LoginResponse, tags=["authentification"])
-def login(creds: LoginRequest):
-    """Connexion opérateur par identifiant et mot de passe (retourne le jeton Bearer)."""
-    user_ok = secrets.compare_digest(creds.username.strip(), config.DASHBOARD_USER)
-    pass_ok = secrets.compare_digest(creds.password.strip(), config.DASHBOARD_PASS)
-    # Permet aussi de se connecter en saisissant directement l'API_TOKEN dans le mot de passe
-    token_direct_ok = secrets.compare_digest(creds.password.strip(), config.API_TOKEN)
-
-    if not ((user_ok and pass_ok) or token_direct_ok):
-        raise HTTPException(401, "Identifiant ou mot de passe incorrect")
-
-    return {
-        "token": config.API_TOKEN,
-        "username": creds.username if user_ok else "operator",
-        "role": "operator",
-    }
-
-
 # --- Contrôle Réactif des Actionneurs (Raccourcis superviseur) ------------------------
 @router.post("/actuators/airlock", status_code=202, tags=["actionneurs"], dependencies=operator)
 def control_airlock(action: AirlockAction):
@@ -299,12 +287,15 @@ def emergency_stop():
 async def upload_snapshot(request: Request):
     """Reçoit la dernière image JPEG traitée par le script IA webcam et la garde en mémoire."""
     global _latest_snapshot, _latest_snapshot_ts
-    _latest_snapshot = await request.body()
+    body = await request.body()          # taille déjà plafonnée par le middleware (413)
+    if len(body) > MAX_SNAPSHOT_BYTES or not body.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(415, "image JPEG de 2 Mio maximum attendue")
+    _latest_snapshot = body
     _latest_snapshot_ts = datetime.now(timezone.utc)
     return {"status": "ok", "bytes": len(_latest_snapshot), "ts": _latest_snapshot_ts.isoformat()}
 
 
-@router.get("/vision/snapshot", tags=["vision IA"], dependencies=operator)
+@router.get("/vision/snapshot", tags=["vision IA"], dependencies=viewer)
 def get_latest_snapshot():
     """Renvoie la dernière capture webcam en direct (JPEG) pour l'incrustation sur le Dashboard."""
     global _latest_snapshot
@@ -321,7 +312,7 @@ def get_latest_snapshot():
     return RawResponse(content=_latest_snapshot, media_type="image/jpeg")
 
 
-@router.get("/vision/events", response_model=list[VisionEventOut], tags=["vision IA"], dependencies=operator)
+@router.get("/vision/events", response_model=list[VisionEventOut], tags=["vision IA"], dependencies=viewer)
 def list_vision_events(limit: Limit = 100):
     with pool.connection() as conn:
         return conn.execute("SELECT * FROM vision_events ORDER BY ts DESC, id DESC LIMIT %s", (limit,)).fetchall()

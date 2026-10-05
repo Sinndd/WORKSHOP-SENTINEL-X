@@ -7,7 +7,7 @@
 // CONFIGURATION RESEAU & WI-FI (Table EPSI)
 // ==========================================
 const char* const WIFI_SSID     = "SENTINEL_AP";
-const char* const WIFI_PASSWORD = "AetherCorp2050Secure!";
+const char* const WIFI_PASSWORD = "CHANGE-ME"; // ancien firmware PlatformIO (MQTT clair, obsolète) : ne pas utiliser, voir firmware/sentinel_core;
 
 // ==========================================
 // CONFIGURATION SERVEUR LOCAL (PC ou RPi 5)

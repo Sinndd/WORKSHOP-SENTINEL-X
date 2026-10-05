@@ -12,8 +12,8 @@
 #define PIN_SCL 5 // D1
 #define PIN_SDA 4 // D2
 
-// CAPTEUR DE PRÉSENCE SUR D3
-#define PIN_PIR 0 // D3 (GPIO0)
+// CAPTEUR DE PRÉSENCE SUR D0 (GPIO16) : D3/GPIO0 passe l'ESP en mode flash si le PIR est à 0 au reset
+#define PIN_PIR 16 // D0 (GPIO16)
 
 // LED RGB KS
 #define PIN_RGB_BLUE   14 // D5

@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "SENTINEL")(type "KiCad")(uri "${KIPRJMOD}/SENTINEL.kicad_sym")(options "")(descr "Symboles du projet SENTINEL-X"))
+)

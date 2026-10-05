@@ -1,5 +1,7 @@
 # GUIDE DE CONCEPTION DU SCHÉMA ÉLECTRIQUE SOUS KICAD — SENTINEL-X
 
+> **Schéma v3.0** : `hardware/kicad/SENTINEL-X.kicad_sch` est généré par `node hardware/kicad/gen_schematic.cjs` (symboles dans `SENTINEL.kicad_sym`, déclarés par `sym-lib-table`). Modifier le montage = modifier ce script puis le relancer ; ERC : `kicad-cli sch erc`. Les exports `docs/schema_electrique_kicad.svg/.pdf` sont à jour. Ce guide décrit la méthode manuelle d'origine ; en cas d'écart, le fichier KiCad fait foi (PIR sur **D0**, alimenté en **5 V**).
+
 Ce document sert de feuille de route pas-à-pas pour dessiner le schéma électronique officiel dans **KiCad Schematic Editor (Eeschema)** pour le dossier technique du Workshop.
 
 ---
@@ -46,7 +48,7 @@ Utilise l'outil fil (**touche `W`**) ou des **Net Labels (touche `L`)** pour rel
 | :--- | :--- | :--- |
 | **D1** (GPIO5) | `I2C_SCL` | Broche **SCL** de l'écran OLED HW-416A |
 | **D2** (GPIO4) | `I2C_SDA` | Broche **SDA** de l'écran OLED HW-416A |
-| **D3** (GPIO0) | `PIR_SIG` | Broche **OUT** du Capteur de Présence PIR |
+| **D0** (GPIO16) | `PIR_SIG` | Broche **OUT** du Capteur de Présence PIR |
 | **D4** (GPIO2) | `DHT_DATA` | Broche **DATA** du Capteur V182 (DHT22) |
 | **D5** (GPIO14) | `RGB_BLUE` | Broche **B** du Module LED KS RGB |
 | **D6** (GPIO12) | `RGB_GREEN` | Broche **G** du Module LED KS RGB |

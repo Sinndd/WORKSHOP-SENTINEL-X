@@ -19,6 +19,11 @@ rand() { head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-32; }
 
 umask 077
 
+# UID/GID de Mosquitto. Sous Git Bash (Windows) l'UID hôte n'existe pas dans l'image et fait
+# planter le broker : on utilise l'utilisateur natif "mosquitto" (1883).
+puid="$(id -u)"; pgid="$(id -g)"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) puid=1883; pgid=1883 ;; esac
+
 if [[ -f .env && $FORCE -eq 0 ]]; then
   echo "[gen-env] .env existe déjà : conservé (utiliser --force pour régénérer)."
   # Clés ajoutées à .env.example depuis la génération : complétées avec un nouveau secret, sans toucher aux autres.
@@ -34,8 +39,8 @@ else
   [[ -f .env ]] && cp .env ".env.bak.$(date +%Y%m%d%H%M%S)"
   hn="$(hostname -s 2>/dev/null || hostname)"
   sed \
-    -e "s/^PUID=.*/PUID=$(id -u)/" \
-    -e "s/^PGID=.*/PGID=$(id -g)/" \
+    -e "s/^PUID=.*/PUID=${puid}/" \
+    -e "s/^PGID=.*/PGID=${pgid}/" \
     -e "s/^SENTINEL_HOSTNAME=.*/SENTINEL_HOSTNAME=${hn}/" \
     -e '/^#/d' -e 's/[[:space:]]*#.*$//' \
     .env.example |
@@ -66,7 +71,11 @@ trap 'rm -f "$tmp"' EXIT
 } > "$tmp"
 
 # mosquitto_passwd -U hache le fichier en place (PBKDF2-SHA512), sans réseau.
-docker run --rm --network none --user "${PUID}:${PGID}" \
+#   MSYS_NO_PATHCONV : sous Git Bash (Windows), évite que /secrets devienne C:/Program Files/Git/secrets.
+# Sous Git Bash, --user est inutile (le montage Windows ignore les UID) et fait échouer l'écriture.
+user_args=(--user "${PUID}:${PGID}")
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) user_args=() ;; esac
+MSYS_NO_PATHCONV=1 docker run --rm --network none "${user_args[@]}" \
   --mount "type=bind,source=$SECRETS_DIR,target=/secrets" "$MOSQUITTO_IMAGE" \
   mosquitto_passwd -U /secrets/passwd.tmp
 mv "$tmp" "$SECRETS_DIR/passwd"

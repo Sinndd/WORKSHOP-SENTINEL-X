@@ -3,18 +3,16 @@
 
 #include <Arduino.h>
 
-// ==========================================
-// IDENTIFIANTS RÉSEAU EXACTS DU PC
-// ==========================================
-#define WIFI_SSID         "Google pixel 10 pro "
-#define WIFI_PASS         "123456789"
+// =========================================================
+// SECRETS (Wi-Fi, mot de passe MQTT, jeton d'appareil) : secrets.h, ignoré par Git
+// (modèle : secrets.h.example)
+// =========================================================
+#include "secrets.h"
 
 #define SERVER_HOST       "10.69.127.207"
 #define HTTP_PORT         8000
 #define MQTT_PORT         8883            // MQTTS chiffré TLS selon CONTRAT-MQTT § 1
 #define MQTT_USER         "esp32"
-#define MQTT_PASS         "RUDk4PxTwqcENuCaPpisErfQKKQDAuw2"
-#define API_DEVICE_TOKEN  "9BBpI8YAGq35AxpNe0b4WMiMQcqgbwiH"
 
 #define NODE_ID           "SENTINEL-X-CORE"
 
@@ -33,7 +31,7 @@
 
 #define PIN_GAS_MQ        A0  // A0 (ADC0)
 #define PIN_DHT           2   // D4 (GPIO2)
-#define PIN_PIR           0   // D3 (GPIO0)
+#define PIN_PIR           16  // D0 (GPIO16) : libre, aucun rôle au boot (GPIO0/D3 = mode flash si LOW)
 
 #define PIN_RGB_B         14  // D5 (GPIO14)
 #define PIN_RGB_G         12  // D6 (GPIO12)

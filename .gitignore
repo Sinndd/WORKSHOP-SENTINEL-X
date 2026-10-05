@@ -21,3 +21,7 @@ __pycache__/
 # --- Divers ---
 .DS_Store
 *.swp
+
+# --- Firmware : secrets de l'appareil ---
+secrets.h
+!secrets.h.example

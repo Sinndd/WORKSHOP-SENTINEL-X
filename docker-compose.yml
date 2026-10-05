@@ -152,7 +152,7 @@ services:
     build:
       context: .                  # api/ + dashboard/ (cf. .dockerignore : liste blanche, aucun secret)
       dockerfile: api/Dockerfile
-    image: sentinel/api:2.1.0
+    image: sentinel/api:2.2.0
     ports:
       - "${API_BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
     environment:
@@ -169,7 +169,19 @@ services:
       API_TOKEN: ${API_TOKEN:?lancer ./scripts/gen-env.sh}
       API_DEVICE_TOKEN: ${API_DEVICE_TOKEN:?lancer ./scripts/gen-env.sh}
       DASHBOARD_USER: ${DASHBOARD_USER:-admin}
-      DASHBOARD_PASS: ${DASHBOARD_PASS:-sentinel2026}
+      DASHBOARD_PASS: ${DASHBOARD_PASS:-}   # mot de passe TEMPORAIRE du premier admin (changement imposé à la 1re connexion)
+      # Politique de sécurité des comptes (valeurs par défaut dans api/app/config.py)
+      SESSION_IDLE_MIN: ${SESSION_IDLE_MIN:-30}
+      SESSION_ABSOLUTE_H: ${SESSION_ABSOLUTE_H:-12}
+      LOGIN_MAX_FAILS: ${LOGIN_MAX_FAILS:-5}
+      LOCK_BASE_S: ${LOCK_BASE_S:-30}
+      LOCK_MAX_S: ${LOCK_MAX_S:-300}
+      LOGIN_RATE_PER_MIN: ${LOGIN_RATE_PER_MIN:-10}
+      API_DOCS: ${API_DOCS:-on}   # off en production : masque /docs et /openapi.json
+      IP_BLOCKING: ${IP_BLOCKING:-off}
+      IP_FAIL_THRESHOLD: ${IP_FAIL_THRESHOLD:-20}
+      IP_BLOCK_MIN: ${IP_BLOCK_MIN:-15}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       MOTOR_COUNT: "6"
     volumes:
       - { type: bind, source: ./mosquitto/certs/ca.crt, target: /certs/ca.crt, read_only: true, bind: { create_host_path: false } }

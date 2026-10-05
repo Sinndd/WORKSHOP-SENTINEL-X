@@ -12,6 +12,7 @@ Le Pi sert aussi de point d'accès Wi-Fi 2.4 GHz (`wlan0`, 192.168.10.0/24) et e
 
 Documentation :
 - **[docs/CONTRAT-MQTT.md](docs/CONTRAT-MQTT.md)** : contrat MQTT v2 (source de vérité ESP32 ↔ serveur) ;
+- **[docs/SECURITE.md](docs/SECURITE.md)** : comptes personnels, rôles, 2FA, verrouillage, blocage d'IP et détection d'intrusion ;
 - **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `:8000/docs`) ;
 - **tableau de bord d'analyse** (React) : `http://192.168.10.1:8000/dashboard/` (jeton `API_TOKEN`).
 

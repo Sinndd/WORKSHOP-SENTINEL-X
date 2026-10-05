@@ -16,6 +16,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Sans RTC ni Internet, un Pi peut démarrer en 1970 : les certificats seraient « expirés » ou « pas encore valides »
+# pour l'ESP8266 (BearSSL vérifie les dates). On refuse de générer avec une horloge manifestement fausse.
+if [[ "$(date +%Y)" -lt 2025 ]]; then
+  echo "[gen-certs] ERREUR : horloge incohérente ($(date)). Régler l'heure (sudo date -s 'AAAA-MM-JJ HH:MM:SS') puis relancer." >&2
+  exit 1
+fi
+
 FORCE_SERVER=0
 [[ "${1:-}" == "--force-server" ]] && FORCE_SERVER=1
 
@@ -68,7 +75,8 @@ if [[ $need_server -eq 1 ]]; then
   echo "[gen-certs] Création du certificat serveur (ECDSA P-256, 825 j)."
   echo "[gen-certs] SAN = $SAN"
   openssl ecparam -name prime256v1 -genkey -noout -out "$DIR/server.key"
-  openssl req -new -key "$DIR/server.key" -subj "/CN=sentinel.local/O=EPSI Workshop SENTINEL-X" -out "$DIR/server.csr"
+  # MSYS_NO_PATHCONV : sous Git Bash, évite que "/CN=..." soit pris pour un chemin et converti.
+  MSYS_NO_PATHCONV=1 openssl req -new -key "$DIR/server.key" -subj "/CN=sentinel.local/O=EPSI Workshop SENTINEL-X" -out "$DIR/server.csr"
   cat > "$ext" <<EOF
 basicConstraints       = critical,CA:FALSE
 keyUsage               = critical,digitalSignature

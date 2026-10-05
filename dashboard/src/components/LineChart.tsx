@@ -19,8 +19,8 @@ interface Props {
   onHover: (t: number | null) => void;
 }
 
-const HEIGHT = 190;
-const M = { top: 10, right: 12, bottom: 24, left: 44 };
+const HEIGHT = 150;
+const M = { top: 8, right: 10, bottom: 22, left: 38 };
 
 /** Graduations « rondes » (1, 2, 5 x 10^n). */
 function niceTicks(min: number, max: number, count = 4): number[] {

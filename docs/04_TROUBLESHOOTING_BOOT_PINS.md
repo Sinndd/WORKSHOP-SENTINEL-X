@@ -17,7 +17,8 @@ Sur l'ESP8266, certaines broches GPIO possèdent un rôle matériel déterminant
 ### Règle d'or appliquée pour Sentinel-X :
 * **Ne jamais brancher de LED vers la masse sur D3 ou D4**.
 * Pour les LEDs ou actionneurs, utiliser en priorité **D5, D6, D7** qui sont totalement neutres au boot.
-* Les capteurs numériques (comme le DHT ou le PIR) qui intègrent une résistance de pull-up vers le 3.3V peuvent être branchés sur **D3** ou **D4** sans aucun danger.
+* Les capteurs à pull-up (DHT) peuvent aller sur **D4**. Le **PIR HC-SR501 ne doit PAS aller sur D3/D4** : sa sortie est *push-pull* et basse au repos, donc à chaque reset GPIO0 est lu à 0 et l'ESP reste en mode flash. Il est branché sur **D0 (GPIO16)**.
+* Le PIR s'alimente en **5 V (VIN)** : en 3,3 V son régulateur ne fonctionne pas correctement et la sortie devient erratique. Attendre ~60 s de chauffe après la mise sous tension.
 
 ---
 
