@@ -1,14 +1,18 @@
 # SENTINEL-X — Serveur local (Raspberry Pi 3 B+)
 
 Stack Docker-Compose **légère, sécurisée et reproductible** du « PC Serveur Local » de la mission SENTINEL-X.
-Le boîtier IoT (ESP8266 + DHT22, MQ-2, PIR, OLED) publie en **MQTTS** vers un broker Mosquitto. Un service
-d'ingestion valide les messages et les écrit dans PostgreSQL. L'API et le dashboard y lisent les données.
+Le module **ESP32 SENTINEL-X-CORE** (capteurs gaz, température/humidité, PIR, lecteur RFID, 6 moteurs pas-à-pas,
+LED RGB, buzzer) publie en **MQTTS** vers un broker Mosquitto. Un service d'ingestion valide les messages et les écrit
+dans PostgreSQL. L'**API FastAPI** expose alertes, télémétrie et badges, décide des accès RFID et envoie les commandes
+moteurs et alarme.
 
 Cible : **Raspberry Pi 3 Model B+** (1 Go de RAM, Cortex-A53), **Raspberry Pi OS Lite 64-bit (arm64)**.
 Le Pi sert aussi de point d'accès Wi-Fi 2.4 GHz (`wlan0`, 192.168.10.0/24) et exécute le script de vision IA.
 **Budget RAM de la stack Docker : ~450 Mo maximum.**
 
-Contrat d'interface (source de vérité) : **[docs/CONTRAT-MQTT.md](docs/CONTRAT-MQTT.md)**.
+Documentation :
+- **[docs/CONTRAT-MQTT.md](docs/CONTRAT-MQTT.md)** : contrat MQTT v2 (source de vérité ESP32 ↔ serveur) ;
+- **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `:8000/docs`).
 
 ---
 
@@ -32,7 +36,7 @@ sudo ./scripts/setup-pi.sh              # puis « sudo reboot » si le script le
 ./scripts/gen-certs.sh                  # CA + certificat serveur ECDSA P-256, ca_cert.h pour le firmware
 docker compose up -d --build            # premier build : quelques minutes sur le Pi 3
 docker compose ps                       # les 4 services doivent passer « healthy » (~1 min)
-./scripts/smoke-test.sh                 # test de bout en bout : 14 vérifications
+./scripts/smoke-test.sh                 # test de bout en bout : 32 vérifications (MQTT, API, RFID)
 
 sudo ./scripts/harden-host.sh --dry-run # aperçu du pare-feu (UFW + DOCKER-USER) et du durcissement SSH
 sudo ./scripts/harden-host.sh           # garder sa session SSH ouverte, confirmer depuis une 2e session
@@ -46,13 +50,14 @@ Tous les scripts sont **idempotents** : on peut les relancer sans risque.
 
 ```mermaid
 flowchart LR
-  ESP["ESP8266 sentinel-01<br/>192.168.10.20"] -- "MQTTS 8883<br/>wlan0" --> MQ
+  ESP["ESP32 SENTINEL-X-CORE<br/>RFID, capteurs, 6 moteurs"] -- "MQTTS 8883<br/>wlan0" --> MQ
+  ESP -- "POST /api/v1/alerts" --> API
   IA["Script vision IA<br/>(hôte, webcam USB)"] -- "MQTTS 8883" --> MQ
   DASH["Dashboard / clients<br/>192.168.10.0/24"] -- "HTTP 8000" --> API
   subgraph Docker["Docker (Raspberry Pi)"]
     subgraph FE["réseau frontend"]
       MQ["mosquitto<br/>:8883 publié"]
-      API["api (placeholder)<br/>:8000 publié"]
+      API["api FastAPI<br/>:8000 publié"]
     end
     subgraph BE["réseau backend (internal: true)"]
       ING["ingestor"]
@@ -70,7 +75,7 @@ flowchart LR
 | `mosquitto` | `eclipse-mosquitto:2.1.2-alpine` | frontend, backend | **8883/tcp** (MQTTS) | UID de l'hôte (`PUID`) | 32 Mo |
 | `postgres` | `postgres:17.11-alpine3.24` | backend | — | `70` (postgres) | 160 Mo |
 | `ingestor` | build `./ingestor` (`python:3.13.16-alpine3.24`) | backend | — | `10001` | 64 Mo |
-| `api` | build `./api` (placeholder) | frontend, backend | **8000/tcp** | `10002` | 128 Mo |
+| `api` | build `./api` (FastAPI, `python:3.13.16-alpine3.24`) | frontend, backend | **8000/tcp** | `10002` | 128 Mo |
 
 - **backend** est `internal: true`, donc sans route vers l'extérieur. Mosquitto et l'API y sont aussi rattachés pour joindre la base et l'ingestor.
 - **frontend** porte les deux seuls ports publiés. **PostgreSQL n'est jamais publié.**
@@ -78,11 +83,11 @@ flowchart LR
 
 ### Flux de données
 
-1. L'ESP publie `telemetry` (5 s), `alerts`, `status` (retained et Last Will) en TLS, avec un compte limité par ACL.
-2. L'`ingestor` s'abonne, valide chaque JSON (version `v`, types, bornes, cohérence topic/`device_id`), ajoute `received_at`, puis écrit **par lots** dans PostgreSQL. Un message invalide est journalisé et ignoré, sans plantage. En cas de panne de la base, l'écriture est retentée avec backoff.
-3. L'API (équipe DEV) lit la base (`sentinel_app`) et publie les commandes `cmd/buzzer` et `cmd/led`.
-4. Le script IA publie `vision/events` (compte `vision`). La base n'étant jamais publiée, les lectures se font par l'API,
-   ou avec `sentinel_ro` depuis un conteneur rattaché au réseau `backend`.
+1. L'ESP32 publie `sentinel/telemetry` (2 s) et `sentinel/alerts` en TLS, avec le compte `esp32` limité par ACL. Les alertes peuvent aussi passer par `POST /api/v1/alerts` (jeton d'appareil).
+2. L'`ingestor` s'abonne, valide chaque JSON (types, bornes, énumérations), ajoute `received_at`, puis écrit **par lots** dans PostgreSQL. Un message invalide est journalisé et ignoré, sans plantage. En cas de panne de la base, l'écriture est retentée avec backoff.
+3. **RFID** : l'ESP32 publie `sentinel/access`. L'API vérifie le badge en base, journalise le passage et répond sur `sentinel/access/response` (ouverture du sas). Un refus crée une alerte `UNAUTHORIZED_ACCESS`.
+4. **Commandes** : `POST /api/v1/commands` (moteurs, arrêt d'urgence, alarme) est validé puis publié sur `sentinel/commands` et journalisé.
+5. Le script IA publie `sentinel/vision/events` (compte `vision`) et lit l'historique par l'API (`GET /api/v1/telemetry`). La base n'est jamais publiée.
 
 ---
 
@@ -99,13 +104,13 @@ qu'au Pi). Les lignes OS et démon Docker sont des **estimations**, à remplacer
 | OS Lite (noyau, systemd, sshd, hostapd, dnsmasq, chrony) | ~130 Mo | *à mesurer* | journald en RAM plafonné à 32 Mo |
 | Docker Engine (dockerd + containerd + shims) | ~70 Mo | *à mesurer* | hors limites cgroup |
 | `mosquitto` | 32 Mo | **2,4 Mo** | pas de persistance, file ≤ 1 Mio par client |
-| `postgres` | 160 Mo | **19 Mo** | `shared_buffers=24MB`, croît avec le cache (≤ ~60 Mo attendus) |
-| `ingestor` | 64 Mo | **26 Mo** | Python + paho + psycopg ; file tampon ≤ 2000 messages |
-| `api` (placeholder) | 128 Mo | **11 Mo** | réservé pour l'API réelle de l'équipe DEV |
-| **Sous-total conteneurs** | **384 Mo** | **≈ 58 Mo** | |
-| **Stack Docker complète** (moteur + conteneurs) | **≈ 454 Mo** | **≈ 130 Mo** (estimé) | budget visé : ~450 Mo ✔ |
+| `postgres` | 160 Mo | **23 Mo** | `shared_buffers=24MB`, croît avec le cache (≤ ~60 Mo attendus) |
+| `ingestor` | 64 Mo | **25 Mo** | Python + paho + psycopg ; file tampon ≤ 2000 messages |
+| `api` (FastAPI + uvicorn, 1 worker) | 128 Mo | **44 Mo** | pool de 4 connexions PostgreSQL + client MQTT |
+| **Sous-total conteneurs** | **384 Mo** | **≈ 93 Mo** | |
+| **Stack Docker complète** (moteur + conteneurs) | **≈ 454 Mo** | **≈ 165 Mo** (estimé) | budget visé : ~450 Mo ✔ |
 | **Réserve pour l'IA** (pire cas : toutes limites atteintes) | **≈ 420 Mo** | — | 1024 − 16 − 130 − 454 |
-| **Réserve pour l'IA** (usage mesuré) | **≈ 750 Mo** | — | |
+| **Réserve pour l'IA** (usage mesuré) | **≈ 710 Mo** | — | |
 | Swap | zram (~450 Mo compressés en RAM) | — | aucun swap sur la carte SD |
 
 À vérifier sur le Pi (et à reporter dans ce tableau) :
@@ -132,8 +137,9 @@ l'objectif de 150 Mo. Si le disque ou la RAM manquent, voir la variante SQLite (
 |---|---|
 | Aucun secret dans Git | `.env`, `mosquitto/secrets/*`, `mosquitto/certs/*` gitignorés ; `.env.example` versionné. `gen-env.sh` génère des mots de passe aléatoires de 32 caractères. |
 | Mots de passe MQTT | hachés par `mosquitto_passwd -U` (PBKDF2-SHA512) dans un conteneur sans réseau ; jamais passés en argument de commande. |
-| TLS | CA interne + certificat serveur **ECDSA P-256**. **TLS 1.2 minimum.** Suites ECDHE-ECDSA compatibles BearSSL (AES-GCM, ChaCha20). RSA, CBC-SHA1 et TLS 1.1 refusés (vérifié). |
+| TLS | CA interne + certificat serveur **ECDSA P-256**. **TLS 1.2 minimum.** Suites ECDHE-ECDSA compatibles mbedTLS de l'ESP32 (AES-GCM, ChaCha20). RSA, CBC-SHA1 et TLS 1.1 refusés (vérifié). |
 | Authentification / ACL | `allow_anonymous false`, un compte par composant, ACL au topic près (cf. contrat). |
+| API | jetons Bearer distincts (opérateur / appareil), comparés en temps constant ; le jeton d'appareil ne permet que `POST /api/v1/alerts`. Validation stricte des entrées (422), commandes moteurs bornées (`motor_id`, `speed_rpm`…) avant publication, journal des commandes et des accès. |
 | Base de données | superuser réservé à l'init et aux sauvegardes ; `sentinel_app` (SELECT/INSERT/UPDATE) et `sentinel_ro` (SELECT, `default_transaction_read_only`) ; `statement_timeout` ; `CONNECT` révoqué pour `PUBLIC`. |
 | Conteneurs | non-root, `cap_drop: [ALL]` (aucune capacité réajoutée), `no-new-privileges`, `read_only: true` + `tmpfs`, `pids_limit`, limites CPU/RAM, images épinglées (jamais `latest`), aucun socket Docker monté. |
 | Réseaux | `backend` interne ; seuls 8883 et 8000 publiés. |
@@ -159,23 +165,22 @@ CA=mosquitto/certs/ca.crt
 mosquitto_sub -h 192.168.10.1 -p 8883 --cafile $CA -u api -P "$MQTT_PASS_API" -t 'sentinel/#' -v
 ```
 
-Publier une telemetry (compte de l'ESP) :
+Publier une télémétrie, puis un passage de badge (compte `esp32`) :
 
 ```bash
-mosquitto_pub -h 192.168.10.1 -p 8883 --cafile $CA -u esp_sentinel-01 -P "$MQTT_PASS_ESP_SENTINEL_01" \
-  -t sentinel/sentinel-01/telemetry -q 0 \
-  -m "{\"v\":1,\"device_id\":\"sentinel-01\",\"ts\":$(date +%s),\"seq\":1,\"temperature_c\":22.5,\"humidity_pct\":45,\"gas_raw\":321,\"motion\":false,\"rssi_dbm\":-58,\"uptime_s\":10}"
+mosquitto_pub -h 192.168.10.1 -p 8883 --cafile $CA -u esp32 -P "$MQTT_PASS_ESP32" -t sentinel/telemetry -q 0 \
+  -m "{\"node_id\":\"SENTINEL-X-CORE\",\"timestamp\":$(date +%s),\"metrics\":{\"temperature_celsius\":23.4,\"humidity_percent\":48.0,\"gas_raw_ppm\":215,\"presence_detected\":false}}"
+
+mosquitto_pub -h 192.168.10.1 -p 8883 --cafile $CA -u esp32 -P "$MQTT_PASS_ESP32" -t sentinel/access -q 1 \
+  -m '{"node_id":"SENTINEL-X-CORE","card_uid":"A3:5F:B2:1C","door_id":"AIRLOCK_MAIN"}'
+# -> réponse de l'API visible sur sentinel/access/response (mosquitto_sub ci-dessus)
 ```
 
-Publier une alerte (QoS 1) puis envoyer une commande au buzzer :
+Envoyer une commande (passe par l'API, qui valide et publie sur `sentinel/commands`) :
 
 ```bash
-mosquitto_pub -h 192.168.10.1 -p 8883 --cafile $CA -u esp_sentinel-01 -P "$MQTT_PASS_ESP_SENTINEL_01" \
-  -t sentinel/sentinel-01/alerts -q 1 \
-  -m "{\"v\":1,\"device_id\":\"sentinel-01\",\"ts\":$(date +%s),\"type\":\"gas_high\",\"severity\":\"critical\",\"value\":812,\"threshold\":600,\"message\":\"test manuel\"}"
-
-mosquitto_pub -h 192.168.10.1 -p 8883 --cafile $CA -u api -P "$MQTT_PASS_API" \
-  -t sentinel/sentinel-01/cmd/buzzer -q 1 -m '{"v":1,"state":"on","duration_s":3}'
+curl -X POST http://192.168.10.1:8000/api/v1/commands -H "Authorization: Bearer $API_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"action":"EMERGENCY_STOP_ALL"}'
 ```
 
 Contrôles négatifs attendus :
@@ -202,15 +207,21 @@ docker run --rm --network sentinel_frontend \
 ./scripts/smoke-test.sh --host 192.168.10.1  # via le port publié (depuis le Pi)
 ```
 
-Il vérifie : port 1883 absent, connexion anonyme et mauvais mot de passe refusés, telemetry, alerte et événement vision
-présents en base (lus avec `sentinel_ro`), `devices.last_seen`/`state` mis à jour, publication hors ACL et alerte hors
-contrat **non** insérées, JSON invalide journalisé, `sentinel_ro` incapable d'écrire, ingestor toujours `healthy`.
+Les 32 vérifications couvrent :
+- **broker** : port 1883 absent, refus de la connexion anonyme et du mauvais mot de passe, ACL (l'ESP ne peut pas publier de commande) ;
+- **télémétrie** : formats de la spec et du firmware réel (horodatage `millis()`), alertes MQTT, vision, JSON invalide journalisé ;
+- **API** : `/health`, `/ready`, jetons (401), validation (422), alertes HTTP, acquittement ;
+- **RFID** : badge autorisé, réponse `access_granted: true` reçue par l'ESP ; badge inconnu, refus et alerte `UNAUTHORIZED_ACCESS` ; révocation ;
+- **commandes** : `CONTROL_MOTORS` reçu par l'ESP sur `sentinel/commands`, `motor_id` hors plage refusé, journalisation ;
+- **base** : `sentinel_ro` ne peut pas écrire, services toujours `healthy`.
 
-Tests unitaires de la validation :
+Tests unitaires :
 
 ```bash
+# Validation de l'ingestor
 docker run --rm --mount type=bind,source="$PWD/ingestor",target=/app,readonly -w /app \
   python:3.13.16-alpine3.24 python -m unittest -v
+# API (modèles, jetons, 422) : commande dans l'en-tête de api/tests/test_api.py
 ```
 
 ---
@@ -257,13 +268,12 @@ docker compose logs --tail 50 mosquitto       # connexions, refus d'authentifica
 
 | Équipe | Ce qu'il faut récupérer |
 |---|---|
-| **Firmware** | `mosquitto/certs/ca_cert.h` (généré sur le Pi), le mot de passe `MQTT_PASS_ESP_SENTINEL_01` du `.env` (à mettre dans un `secrets.h` non versionné), et le contrat § 5–6. |
-| **API (DEV)** | Remplacer le contenu de `api/` en gardant : un utilisateur non-root, le port 8000, `GET /health`, et l'implémentation de `POST /api/v1/alerts` (schéma `alerts` du contrat). Variables fournies : `PGHOST`, `PGDATABASE`, `PGUSER=sentinel_app`, `PGPASSWORD`, `MQTT_HOST`, `MQTT_PORT`, `MQTT_USERNAME=api`, `MQTT_PASSWORD`, `MQTT_CAFILE`. Si l'API écrit des fichiers, ajouter un `tmpfs` (le système de fichiers est en lecture seule). Ajuster `mem_limit` après mesure. |
-| **IA (vision)** | Script lancé sur l'hôte : MQTTS vers `127.0.0.1:8883` ou `192.168.10.1:8883` (les deux sont dans le SAN), compte `vision`, CA `mosquitto/certs/ca.crt`, payload `vision/events`. Lecture des données via l'API. Une lecture SQL directe n'est possible que depuis un conteneur rattaché au réseau `backend`, avec `PGUSER=sentinel_ro`. |
-| **Dashboard** | Via l'API (port 8000). Si le dashboard devient un service du compose, le rattacher à `backend` et lui donner `PGUSER=sentinel_ro` / `PGPASSWORD=${SENTINEL_RO_PASSWORD}` : lecture seule garantie par la base. |
+| **Firmware ESP32** | `mosquitto/certs/ca_cert.h` (généré sur le Pi), `MQTT_PASS_ESP32` et `API_DEVICE_TOKEN` du `.env` (à mettre dans un `secrets.h` non versionné). **Adaptations obligatoires du firmware `04`** (TLS 8883, authentification, tampon de 1024 octets, traitement des commandes, pont diviseur du capteur MQ) : [contrat § 6](docs/CONTRAT-MQTT.md). |
+| **API / Dashboard (DEV)** | [docs/API.md](docs/API.md) et `http://192.168.10.1:8000/docs`. Jeton `API_TOKEN`. Pour faire évoluer l'API : code dans `api/app/`, contraintes du conteneur en fin de `docs/API.md`. |
+| **IA** | Historique de la télémétrie : `GET /api/v1/telemetry` (jeton `API_TOKEN`). Caméra : MQTTS vers `127.0.0.1:8883` ou `192.168.10.1:8883`, compte `vision`, CA `mosquitto/certs/ca.crt`, topic `sentinel/vision/events` ([contrat § 7](docs/CONTRAT-MQTT.md)). |
 
-Changer un mot de passe : modifier la valeur dans `.env`, relancer `./scripts/gen-env.sh` (régénère `passwd`), puis
-`docker compose up -d`. Pour les rôles PostgreSQL : `ALTER ROLE … PASSWORD …` via `docker compose exec postgres psql -U postgres`.
+Changer un mot de passe ou un jeton : modifier la valeur dans `.env`, relancer `./scripts/gen-env.sh` (régénère `passwd`),
+puis `docker compose up -d`. Pour les rôles PostgreSQL : `ALTER ROLE … PASSWORD …` via `docker compose exec postgres psql -U postgres`.
 
 ---
 
@@ -301,13 +311,13 @@ Mise en œuvre prévue (sur demande) : un fichier `docker-compose.sqlite.yml` qu
 │   ├── certs/                  # généré : ca.crt, ca.key, server.*, ca_cert.h (gitignoré)
 │   └── secrets/                # généré : passwd haché (gitignoré)
 ├── db/init/
-│   ├── 01-schema.sql           # devices, sensor_readings, alerts, vision_events
+│   ├── 01-schema.sql           # devices, telemetry, alerts, badges, access_events, commands, vision_events
 │   └── 02-roles.sh             # sentinel_app / sentinel_ro
 ├── ingestor/                   # MQTT -> PostgreSQL (validation, lots, reconnexion) + tests
-├── api/                        # placeholder (/health, /ready, POST /api/v1/alerts -> 501)
+├── api/                        # API FastAPI (app/ : routes, modèles, pont MQTT RFID/commandes) + tests
 ├── scripts/
 │   ├── gen-env.sh  gen-certs.sh             # secrets et PKI
 │   ├── setup-pi.sh  harden-host.sh          # préparation et durcissement de l'hôte (--dry-run)
 │   ├── status.sh  backup-db.sh  smoke-test.sh
-└── docs/CONTRAT-MQTT.md        # contrat d'interface v1
+└── docs/                       # CONTRAT-MQTT.md (v2), API.md, openapi.json
 ```

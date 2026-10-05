@@ -1,0 +1,1780 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "API SENTINEL-X",
+    "description": "Supervision du module ESP32 SENTINEL-X : alertes, télémétrie, contrôle d'accès RFID, commandes moteurs/alarme. Authentification : `Authorization: Bearer <jeton>`.",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/api/v1/alerts": {
+      "post": {
+        "tags": [
+          "alertes"
+        ],
+        "summary": "Create Alert",
+        "description": "Alerte critique émise par l'ESP32 (jeton d'appareil) ou saisie par un opérateur.",
+        "operationId": "create_alert_api_v1_alerts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "alertes"
+        ],
+        "summary": "List Alerts",
+        "operationId": "list_alerts_api_v1_alerts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "INFO",
+                    "WARNING",
+                    "CRITICAL"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "name": "acknowledged",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Acknowledged"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AlertOut"
+                  },
+                  "title": "Response List Alerts Api V1 Alerts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alerts/{alert_id}/ack": {
+      "post": {
+        "tags": [
+          "alertes"
+        ],
+        "summary": "Acknowledge Alert",
+        "operationId": "acknowledge_alert_api_v1_alerts__alert_id__ack_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "alert_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Alert Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "tags": [
+          "télémétrie"
+        ],
+        "summary": "List Devices",
+        "operationId": "list_devices_api_v1_devices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Devices Api V1 Devices Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/telemetry/latest": {
+      "get": {
+        "tags": [
+          "télémétrie"
+        ],
+        "summary": "Latest Telemetry",
+        "operationId": "latest_telemetry_api_v1_telemetry_latest_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "SENTINEL-X-CORE",
+              "title": "Node Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/telemetry": {
+      "get": {
+        "tags": [
+          "télémétrie"
+        ],
+        "summary": "Telemetry History",
+        "description": "Historique (plus récent d'abord) : dashboard et modèle IA de maintenance prédictive.",
+        "operationId": "telemetry_history_api_v1_telemetry_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "node_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "SENTINEL-X-CORE",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Until"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TelemetryOut"
+                  },
+                  "title": "Response Telemetry History Api V1 Telemetry Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/events": {
+      "get": {
+        "tags": [
+          "accès RFID"
+        ],
+        "summary": "List Access Events",
+        "operationId": "list_access_events_api_v1_access_events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccessEventOut"
+                  },
+                  "title": "Response List Access Events Api V1 Access Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/badges": {
+      "get": {
+        "tags": [
+          "accès RFID"
+        ],
+        "summary": "List Badges",
+        "operationId": "list_badges_api_v1_badges_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BadgeOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Badges Api V1 Badges Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/badges/{card_uid}": {
+      "put": {
+        "tags": [
+          "accès RFID"
+        ],
+        "summary": "Upsert Badge",
+        "description": "Crée ou modifie un badge autorisé (active=false pour le révoquer).",
+        "operationId": "upsert_badge_api_v1_badges__card_uid__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){3,9}$",
+              "examples": [
+                "A3:5F:B2:1C"
+              ],
+              "title": "Card Uid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BadgeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadgeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "accès RFID"
+        ],
+        "summary": "Revoke Badge",
+        "description": "Révocation (le badge est conservé pour l'historique, active=false).",
+        "operationId": "revoke_badge_api_v1_badges__card_uid__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){3,9}$",
+              "examples": [
+                "A3:5F:B2:1C"
+              ],
+              "title": "Card Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadgeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commands": {
+      "post": {
+        "tags": [
+          "commandes"
+        ],
+        "summary": "Send Command",
+        "description": "Publie l'ordre tel quel sur sentinel/commands (QoS 1) après validation, et le journalise.",
+        "operationId": "send_command_api_v1_commands_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OperateMotor"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ControlMotors"
+                  },
+                  {
+                    "$ref": "#/components/schemas/EmergencyStopAll"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TriggerAlarm"
+                  }
+                ],
+                "title": "Command"
+              },
+              "examples": {
+                "sas": {
+                  "value": {
+                    "action": "OPERATE_MOTOR",
+                    "target": "AIRLOCK_MAIN",
+                    "command": "OPEN",
+                    "duration_ms": 3000
+                  }
+                },
+                "multi-moteurs": {
+                  "value": {
+                    "action": "CONTROL_MOTORS",
+                    "commands": [
+                      {
+                        "motor_id": 0,
+                        "direction": "CW",
+                        "angle_deg": 90,
+                        "speed_rpm": 12
+                      },
+                      {
+                        "motor_id": 1,
+                        "direction": "CCW",
+                        "angle_deg": 180,
+                        "speed_rpm": 8
+                      }
+                    ]
+                  }
+                },
+                "arrêt d'urgence": {
+                  "value": {
+                    "action": "EMERGENCY_STOP_ALL"
+                  }
+                },
+                "alarme": {
+                  "value": {
+                    "action": "TRIGGER_ALARM",
+                    "state": true,
+                    "color": "RED",
+                    "sound": "SIREN_ALERT"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "commandes"
+        ],
+        "summary": "List Commands",
+        "operationId": "list_commands_api_v1_commands_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommandOut"
+                  },
+                  "title": "Response List Commands Api V1 Commands Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vision/events": {
+      "get": {
+        "tags": [
+          "vision IA"
+        ],
+        "summary": "List Vision Events",
+        "operationId": "list_vision_events_api_v1_vision_events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VisionEventOut"
+                  },
+                  "title": "Response List Vision Events Api V1 Vision Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "supervision"
+        ],
+        "summary": "Health",
+        "description": "Vivacité du processus (healthcheck Docker), sans dépendance externe.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "supervision"
+        ],
+        "summary": "Ready",
+        "description": "Disponibilité : base de données et broker MQTT joignables.",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccessEventOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "card_uid": {
+            "type": "string",
+            "title": "Card Uid"
+          },
+          "card_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Type"
+          },
+          "door_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Door Id"
+          },
+          "access_granted": {
+            "type": "boolean",
+            "title": "Access Granted"
+          },
+          "user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Name"
+          },
+          "clearance_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clearance Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "node_id",
+          "ts",
+          "received_at",
+          "card_uid",
+          "card_type",
+          "door_id",
+          "access_granted",
+          "user_name",
+          "clearance_level"
+        ],
+        "title": "AccessEventOut"
+      },
+      "AlertIn": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$",
+            "title": "Node Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "INTRUSION_DETECTED",
+              "GAS_LEAK_WARNING",
+              "THERMAL_RUNAWAY",
+              "UNAUTHORIZED_ACCESS"
+            ],
+            "title": "Event Type"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "INFO",
+              "WARNING",
+              "CRITICAL"
+            ],
+            "title": "Severity"
+          },
+          "source_sensor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sensor"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "event_type",
+          "severity"
+        ],
+        "title": "AlertIn",
+        "description": "POST /api/v1/alerts et topic sentinel/alerts (03_SPECIFICATION § 1.B).",
+        "examples": [
+          {
+            "details": "Mouvement anormal detecte dans le perimetre d'acces restreint",
+            "event_type": "INTRUSION_DETECTED",
+            "node_id": "SENTINEL-X-CORE",
+            "severity": "CRITICAL",
+            "source_sensor": "PIR_MOTION",
+            "timestamp": 1728132045,
+            "value": 1.0
+          }
+        ]
+      },
+      "AlertOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "source_sensor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sensor"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "acknowledged": {
+            "type": "boolean",
+            "title": "Acknowledged"
+          },
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "node_id",
+          "ts",
+          "received_at",
+          "event_type",
+          "severity",
+          "source_sensor",
+          "value",
+          "details",
+          "channel",
+          "acknowledged",
+          "acknowledged_at"
+        ],
+        "title": "AlertOut"
+      },
+      "BadgeIn": {
+        "properties": {
+          "user_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "User Name"
+          },
+          "clearance_level": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Clearance Level"
+          },
+          "auto_unlock_door": {
+            "type": "boolean",
+            "title": "Auto Unlock Door",
+            "default": true
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_name",
+          "clearance_level"
+        ],
+        "title": "BadgeIn"
+      },
+      "BadgeOut": {
+        "properties": {
+          "card_uid": {
+            "type": "string",
+            "title": "Card Uid"
+          },
+          "user_name": {
+            "type": "string",
+            "title": "User Name"
+          },
+          "clearance_level": {
+            "type": "string",
+            "title": "Clearance Level"
+          },
+          "auto_unlock_door": {
+            "type": "boolean",
+            "title": "Auto Unlock Door"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_uid",
+          "user_name",
+          "clearance_level",
+          "auto_unlock_door",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BadgeOut"
+      },
+      "CommandOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "topic",
+          "action",
+          "payload"
+        ],
+        "title": "CommandOut"
+      },
+      "ControlMotors": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "CONTROL_MOTORS",
+            "title": "Action"
+          },
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/MotorStep"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Commands"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "commands"
+        ],
+        "title": "ControlMotors",
+        "description": "03_CONTRAT § 3.A : plusieurs moteurs simultanément."
+      },
+      "DeviceOut": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "last_seen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen"
+          },
+          "last_uptime_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Uptime Ms"
+          },
+          "last_wifi_rssi_dbm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Wifi Rssi Dbm"
+          },
+          "last_free_heap_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Free Heap Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "name",
+          "last_seen",
+          "last_uptime_ms",
+          "last_wifi_rssi_dbm",
+          "last_free_heap_bytes"
+        ],
+        "title": "DeviceOut"
+      },
+      "EmergencyStopAll": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "EMERGENCY_STOP_ALL",
+            "title": "Action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "EmergencyStopAll",
+        "description": "03_CONTRAT § 3.B."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MotorStep": {
+        "properties": {
+          "motor_id": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Motor Id"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "CW",
+              "CCW"
+            ],
+            "title": "Direction"
+          },
+          "angle_deg": {
+            "type": "integer",
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Angle Deg"
+          },
+          "speed_rpm": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 1.0,
+            "title": "Speed Rpm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "motor_id",
+          "direction",
+          "angle_deg",
+          "speed_rpm"
+        ],
+        "title": "MotorStep"
+      },
+      "OperateMotor": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "OPERATE_MOTOR",
+            "title": "Action"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "AIRLOCK_MAIN",
+              "GAS_VALVE",
+              "BARRIER",
+              "VENT"
+            ],
+            "title": "Target"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "CLOSE",
+              "STOP"
+            ],
+            "title": "Command"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 60000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "target",
+          "command"
+        ],
+        "title": "OperateMotor",
+        "description": "03_SPECIFICATION § 2.A."
+      },
+      "TelemetryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "node_id": {
+            "type": "string",
+            "title": "Node Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "device_timestamp": {
+            "type": "integer",
+            "title": "Device Timestamp"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "uptime_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Ms"
+          },
+          "temperature_celsius": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature Celsius"
+          },
+          "humidity_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Percent"
+          },
+          "gas_raw_ppm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Raw Ppm"
+          },
+          "presence_detected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Presence Detected"
+          },
+          "airlock_open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airlock Open"
+          },
+          "gas_valve_open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gas Valve Open"
+          },
+          "ventilation_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ventilation Active"
+          },
+          "barrier_open": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barrier Open"
+          },
+          "alarm_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alarm Active"
+          },
+          "wifi_rssi_dbm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Rssi Dbm"
+          },
+          "free_heap_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Heap Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "node_id",
+          "ts",
+          "device_timestamp",
+          "received_at",
+          "uptime_ms",
+          "temperature_celsius",
+          "humidity_percent",
+          "gas_raw_ppm",
+          "presence_detected",
+          "airlock_open",
+          "gas_valve_open",
+          "ventilation_active",
+          "barrier_open",
+          "alarm_active",
+          "wifi_rssi_dbm",
+          "free_heap_bytes"
+        ],
+        "title": "TelemetryOut"
+      },
+      "TriggerAlarm": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "const": "TRIGGER_ALARM",
+            "title": "Action"
+          },
+          "state": {
+            "type": "boolean",
+            "title": "State"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z0-9_]{1,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "sound": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z0-9_]{1,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sound"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "state"
+        ],
+        "title": "TriggerAlarm",
+        "description": "03_SPECIFICATION § 2.B."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VisionEventOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ts"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "bbox": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bbox"
+          },
+          "frame_w": {
+            "type": "integer",
+            "title": "Frame W"
+          },
+          "frame_h": {
+            "type": "integer",
+            "title": "Frame H"
+          },
+          "snapshot_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ts",
+          "received_at",
+          "label",
+          "confidence",
+          "bbox",
+          "frame_w",
+          "frame_h",
+          "snapshot_path"
+        ],
+        "title": "VisionEventOut"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

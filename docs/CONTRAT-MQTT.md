@@ -1,257 +1,257 @@
-# Contrat MQTT — SENTINEL-X (schéma v1)
+# Contrat MQTT — SENTINEL-X (v2, module ESP32)
 
-> **Source de vérité** pour le firmware (ESP8266), l'API, le script de vision IA, le dashboard et l'ingestion.
-> Aucun topic ni champ ne doit être renommé sans accord de toute l'équipe et sans incrémenter `v`.
+> **Source de vérité** des échanges entre le module **ESP32 SENTINEL-X-CORE**, le PC Serveur Local (ingestor, API)
+> et le script IA. Il est construit à partir des spécifications matérielles : `01_ARCHITECTURE_GLOBALE`,
+> `03_SPECIFICATION_API_ET_CONTRAT_DONNEES` (référence principale), `03_CONTRAT_DONNEES_ET_COMMUNICATION`,
+> `04_FIRMWARE_ESP32_COMPLET` et `05_PILOTAGE_6_MOTEURS_SIMULTANES`.
+> API REST : [API.md](API.md). Ne renommer aucun topic ni champ sans prévenir toute l'équipe.
 
 ## 1. Connexion au broker
 
 | Paramètre | Valeur |
 |---|---|
-| Hôte | `192.168.10.1` (Wi-Fi de la table) — ou `sentinel.local` si le DNS du point d'accès le résout |
-| Port | **8883 (MQTTS uniquement)**. Le port 1883 n'existe pas. |
-| TLS | 1.2 minimum, certificat serveur ECDSA P-256 signé par la **CA interne** (`mosquitto/certs/ca.crt`, `ca_cert.h` pour le firmware) |
-| Authentification | nom d'utilisateur + mot de passe obligatoires (pas d'anonyme), mots de passe dans le `.env` du Pi |
-| Protocole | MQTT 3.1.1 (une publication interdite par l'ACL est **ignorée silencieusement**) |
+| Hôte | `192.168.10.1` (point d'accès Wi-Fi de la table) |
+| Port | **8883, MQTTS uniquement**. Le port 1883 n'existe pas : le firmware `04` doit être adapté (§ 6). |
+| TLS | 1.2 minimum. Certificat serveur ECDSA P-256 signé par la **CA interne** (`mosquitto/certs/ca.crt`, ou `ca_cert.h` pour le firmware) |
+| Authentification | utilisateur + mot de passe obligatoires (pas d'anonyme). Mots de passe dans le `.env` du Pi |
+| Protocole | MQTT 3.1.1. Une publication interdite par l'ACL est **ignorée silencieusement** |
 
-| Compte | Utilisé par | Droits (ACL) |
-|---|---|---|
-| `esp_sentinel-01` | boîtier ESP8266 | publie `sentinel/sentinel-01/{telemetry,alerts,status}`, lit `sentinel/sentinel-01/cmd/#` |
-| `ingestor` | service d'ingestion | lit `sentinel/+/telemetry`, `sentinel/+/alerts`, `sentinel/+/status`, `sentinel/vision/events` |
-| `api` | API (équipe DEV) | lit `sentinel/#`, publie `sentinel/+/cmd/#` |
-| `vision` | script IA (webcam) | publie `sentinel/vision/events` |
+| Compte | Utilisé par | Publie | S'abonne |
+|---|---|---|---|
+| `esp32` | module ESP32 | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/access` | `sentinel/commands`, `sentinel/access/response` |
+| `ingestor` | ingestion → PostgreSQL | — | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/vision/events` |
+| `api` | API REST | `sentinel/commands`, `sentinel/access/response` | `sentinel/#` |
+| `vision` | script IA caméra | `sentinel/vision/events` | — |
 
 ## 2. Topics
 
-`<device_id>` = `sentinel-01` (minuscules, chiffres et `-`, 32 caractères max).
-
-| Topic | Émetteur → Récepteur | QoS | Retained | Fréquence |
+| Topic | Sens | QoS | Fréquence | Traité par |
 |---|---|---|---|---|
-| `sentinel/<device_id>/telemetry` | ESP → serveur | 0 | non | toutes les 5 s |
-| `sentinel/<device_id>/alerts` | ESP → serveur | 1 | non | sur événement |
-| `sentinel/<device_id>/status` | ESP → serveur | 1 | **oui** | à la connexion + **Last Will** `offline` |
-| `sentinel/<device_id>/cmd/buzzer` | API → ESP | 1 | non | sur commande |
-| `sentinel/<device_id>/cmd/led` | API → ESP | 1 | non | sur commande |
-| `sentinel/vision/events` | script IA → serveur | 1 | non | sur détection |
+| `sentinel/telemetry` | ESP32 → serveur | 0 | toutes les 2 s | ingestor |
+| `sentinel/alerts` | ESP32 → serveur | 1 | sur événement | ingestor (aussi possible en `POST /api/v1/alerts`) |
+| `sentinel/access` | ESP32 → serveur | 1 | à chaque badge | API (décision d'accès) |
+| `sentinel/access/response` | serveur → ESP32 | 1 | en réponse à `sentinel/access` | firmware |
+| `sentinel/commands` | serveur → ESP32 | 1 | sur ordre (`POST /api/v1/commands`) | firmware |
+| `sentinel/vision/events` | script IA → serveur | 1 | sur détection | ingestor |
+
+Aucun message n'est publié en *retained*.
 
 ## 3. Règles communes
 
-- JSON compact, encodage UTF-8, clés en **snake_case**, **unité dans le nom** (`_c`, `_pct`, `_dbm`, `_s`).
-- `v` (entier) = version du schéma = **`1`** dans tous les messages. Un message sans `v` ou avec une autre valeur est rejeté.
-- `ts` = horodatage **epoch en secondes, UTC**, donné par l'émetteur (**NTP obligatoire**). Rejeté si antérieur au 01/01/2024 (horloge non synchronisée) ou en avance de plus de 5 min.
-- Taille : **< 512 octets** par message (rejet côté serveur au-delà de 1024).
-- Le serveur ajoute `received_at` (horloge du Pi) à chaque enregistrement.
-- Champs supplémentaires inconnus : tolérés et ignorés (compatibilité ascendante).
-- Un message invalide est **rejeté et journalisé** par l'ingestor, sans interrompre le service.
+- JSON UTF-8, **< 1 Ko** par message (rejeté côté serveur au-delà de 2 Ko).
+- `node_id` : identifiant du module, `"SENTINEL-X-CORE"` (lettres, chiffres, `-`, `_` ; 32 caractères max).
+- `timestamp` (entier) : **epoch Unix en secondes** (ou en millisecondes). Une autre valeur, comme `millis()`
+  depuis le démarrage dans le firmware `04` actuel, est conservée telle quelle (`device_timestamp`), et le
+  serveur horodate alors le message à sa réception. Recommandé : synchroniser l'ESP32 en NTP sur `192.168.10.1`.
+- Le serveur ajoute toujours `received_at` (horloge du Pi).
+- Les valeurs d'énumération sont en **MAJUSCULES** et sensibles à la casse.
+- Champs inconnus : tolérés et ignorés. Exemple : `"type": "TELEMETRY"` de `03_CONTRAT`, ou un tableau `motors`.
+- Un message invalide est **rejeté et journalisé**, sans interrompre le service.
 
-## 4. Messages
+## 4. Messages émis par l'ESP32
 
-### 4.1 `telemetry` (ESP, QoS 0, toutes les 5 s)
+### 4.1 `sentinel/telemetry` (QoS 0, toutes les 2 s)
 
-| Champ | Type | Bornes / valeurs | Remarque |
+| Champ | Type | Obligatoire | Plage / unité |
 |---|---|---|---|
-| `v` | entier | `1` | |
-| `device_id` | chaîne | = `<device_id>` du topic | |
-| `ts` | entier | epoch s | |
-| `seq` | entier | ≥ 0 | compteur incrémenté à chaque envoi (détection de pertes) |
-| `temperature_c` | nombre \| `null` | -40 … 80 | DHT22 ; `null` si la lecture échoue (et alerte `sensor_fault`) |
-| `humidity_pct` | nombre \| `null` | 0 … 100 | DHT22 ; `null` si la lecture échoue |
-| `gas_raw` | entier | 0 … 1023 | MQ-2, valeur ADC brute de A0 |
-| `motion` | booléen | `true` / `false` | PIR HC-SR501 |
-| `rssi_dbm` | entier | -120 … 0 | `WiFi.RSSI()` |
-| `uptime_s` | entier | ≥ 0 | `millis() / 1000` |
+| `node_id` | chaîne | oui | `SENTINEL-X-CORE` |
+| `timestamp` | entier ≥ 0 | oui | cf. § 3 |
+| `uptime_ms` | entier ≥ 0 | non | ms depuis le démarrage |
+| `metrics.temperature_celsius` | nombre \| `null` | oui | -40 … 80 °C (DHT22 / V182) |
+| `metrics.humidity_percent` | nombre \| `null` | oui | 0 … 100 % |
+| `metrics.gas_raw_ppm` | entier | oui | **0 … 4095** (ADC 12 bits brut du MQ, GPIO 34) |
+| `metrics.presence_detected` | booléen | oui | PIR (GPIO 13) |
+| `actuators_state.airlock_open` | booléen | non | sas principal (moteur 1) |
+| `actuators_state.gas_valve_open` | booléen | non | vanne gaz (moteur 2) |
+| `actuators_state.ventilation_active` | booléen | non | trappe de ventilation (moteur 4) |
+| `actuators_state.barrier_open` | booléen | non | barrière (moteur 3) |
+| `actuators_state.alarm_active` | booléen | non | buzzer / LED d'alarme |
+| `system.wifi_rssi_dbm` | entier | non | -120 … 0 |
+| `system.free_heap_bytes` | entier ≥ 0 | non | `ESP.getFreeHeap()` |
 
 ```json
-{"v":1,"device_id":"sentinel-01","ts":1791194400,"seq":1532,"temperature_c":22.4,"humidity_pct":48.1,"gas_raw":312,"motion":false,"rssi_dbm":-61,"uptime_s":7660}
+{"node_id":"SENTINEL-X-CORE","timestamp":1728132000,"uptime_ms":142580,
+ "metrics":{"temperature_celsius":23.4,"humidity_percent":48.0,"gas_raw_ppm":215,"presence_detected":false},
+ "actuators_state":{"airlock_open":false,"gas_valve_open":true,"ventilation_active":false,"barrier_open":false,"alarm_active":false},
+ "system":{"wifi_rssi_dbm":-58,"free_heap_bytes":194200}}
 ```
 
-### 4.2 `alerts` (ESP, QoS 1)
-
-| Champ | Type | Bornes / valeurs |
-|---|---|---|
-| `v` | entier | `1` |
-| `device_id` | chaîne | = `<device_id>` du topic |
-| `ts` | entier | epoch s |
-| `type` | chaîne | `gas_high` \| `temp_high` \| `motion_detected` \| `sensor_fault` \| `tamper` |
-| `severity` | chaîne | `info` \| `warning` \| `critical` |
-| `value` | nombre \| `null` | mesure ayant déclenché l'alerte (`null` si sans objet) |
-| `threshold` | nombre \| `null` | seuil franchi (`null` si sans objet) |
-| `message` | chaîne | 256 caractères max, lisible par un humain |
+La trame minimale réellement émise par le firmware `04` est acceptée :
 
 ```json
-{"v":1,"device_id":"sentinel-01","ts":1791194412,"type":"gas_high","severity":"critical","value":812,"threshold":600,"message":"MQ-2 au-dessus du seuil"}
+{"node_id":"SENTINEL-X-CORE","timestamp":142580,
+ "metrics":{"temperature_celsius":23.4,"humidity_percent":48.0,"gas_raw_ppm":215,"presence_detected":false},
+ "actuators_state":{"airlock_open":false}}
 ```
 
-```json
-{"v":1,"device_id":"sentinel-01","ts":1791194415,"type":"sensor_fault","severity":"warning","value":null,"threshold":null,"message":"DHT22 : lecture impossible"}
-```
+> `null` est attendu pour la température et l'humidité quand le DHT échoue. Le firmware `04` renvoie à la place
+> la dernière valeur lue (0.0 au démarrage) : à corriger côté firmware pour ne pas fausser l'historique et l'IA.
 
-> L'API expose `POST /api/v1/alerts` avec **exactement ce schéma** (corps JSON identique).
+### 4.2 `sentinel/alerts` (QoS 1) — ou `POST /api/v1/alerts`
 
-### 4.3 `status` (ESP, QoS 1, retained, Last Will)
-
-| Champ | Type | Valeurs | Remarque |
+| Champ | Type | Obligatoire | Valeurs |
 |---|---|---|---|
-| `v` | entier | `1` | |
-| `state` | chaîne | `online` \| `offline` | |
-| `ip` | chaîne | IPv4 | obligatoire si `online` |
-| `fw` | chaîne | 32 caractères max | version du firmware, obligatoire si `online` |
-
-Publié **retained** juste après la connexion :
-
-```json
-{"v":1,"state":"online","ip":"192.168.10.20","fw":"1.0.0"}
-```
-
-**Last Will** déclarée à la connexion (même topic, QoS 1, retained). Le broker la publie si l'ESP disparaît (keepalive dépassé) :
+| `node_id` | chaîne | oui | |
+| `timestamp` | entier ≥ 0 | non | cf. § 3 |
+| `event_type` | chaîne | oui | `INTRUSION_DETECTED` \| `GAS_LEAK_WARNING` \| `THERMAL_RUNAWAY` \| `UNAUTHORIZED_ACCESS` |
+| `severity` | chaîne | oui | `INFO` \| `WARNING` \| `CRITICAL` |
+| `source_sensor` | chaîne | non | 64 car. max (`PIR_MOTION`, `MQ2`, `DHT22`…) |
+| `value` | nombre | non | |
+| `details` | chaîne | non | 512 car. max |
 
 ```json
-{"v":1,"state":"offline"}
+{"node_id":"SENTINEL-X-CORE","timestamp":1728132045,"event_type":"INTRUSION_DETECTED","severity":"CRITICAL",
+ "source_sensor":"PIR_MOTION","value":1.0,"details":"Mouvement anormal detecte dans le perimetre d'acces restreint"}
 ```
 
-### 4.4 `cmd/buzzer` et `cmd/led` (API → ESP, QoS 1, non retained)
+`UNAUTHORIZED_ACCESS` est aussi créée **automatiquement par le serveur** lorsqu'un badge est refusé (§ 4.3).
 
-| Topic | Champ | Type | Valeurs |
+### 4.3 `sentinel/access` (QoS 1) — passage d'un badge RFID
+
+| Champ | Type | Obligatoire | Valeurs |
 |---|---|---|---|
-| `cmd/buzzer` | `v` | entier | `1` |
-| | `state` | chaîne | `on` \| `off` |
-| | `duration_s` | entier | 0 … 60 (0 = jusqu'au prochain `off`), ignoré si `off` |
-| `cmd/led` | `v` | entier | `1` |
-| | `led` | chaîne | `status` \| `alert` |
-| | `state` | chaîne | `on` \| `off` \| `blink` |
+| `node_id` | chaîne | oui | |
+| `timestamp` | entier ≥ 0 | non | cf. § 3 |
+| `card_uid` | chaîne | oui | 4, 7 ou 10 octets hexadécimaux séparés par `:` (`A3:5F:B2:1C`), casse libre |
+| `card_type` | chaîne | non | 32 car. max, ex. `MIFARE_CLASSIC` |
+| `door_id` | chaîne | non | 32 car. max, ex. `AIRLOCK_MAIN` |
 
 ```json
-{"v":1,"state":"on","duration_s":5}
+{"node_id":"SENTINEL-X-CORE","timestamp":1728132102,"card_uid":"A3:5F:B2:1C","card_type":"MIFARE_CLASSIC","door_id":"AIRLOCK_MAIN"}
 ```
+
+L'API vérifie que le badge est enregistré et actif (`PUT /api/v1/badges/{uid}`), journalise le passage et répond
+sur `sentinel/access/response` (§ 5.2) en moins d'une seconde.
+
+## 5. Messages reçus par l'ESP32
+
+### 5.1 `sentinel/commands` (QoS 1)
+
+Les messages sont publiés par l'API (`POST /api/v1/commands`) après validation. Le champ `action` détermine le format.
+
+**`OPERATE_MOTOR`** (03_SPECIFICATION § 2.A) : `target` ∈ `AIRLOCK_MAIN` (moteur 1), `GAS_VALVE` (moteur 2),
+`BARRIER` (moteur 3), `VENT` (moteur 4) ; `command` ∈ `OPEN`, `CLOSE`, `STOP` ; `duration_ms` (1–60000) facultatif.
 
 ```json
-{"v":1,"led":"alert","state":"blink"}
+{"action":"OPERATE_MOTOR","target":"AIRLOCK_MAIN","command":"OPEN","duration_ms":3000}
 ```
 
-L'ESP ignore toute commande invalide (version, champ manquant, valeur inconnue).
-
-### 4.5 `vision/events` (script IA, QoS 1)
-
-| Champ | Type | Bornes / valeurs | Remarque |
-|---|---|---|---|
-| `v` | entier | `1` | |
-| `ts` | nombre | epoch s | décimales acceptées |
-| `label` | chaîne | 1 … 64 caractères | ex. `person` |
-| `confidence` | nombre | 0 … 1 | |
-| `bbox` | tableau | `[x, y, w, h]`, nombres ≥ 0, en pixels, dans l'image | origine en haut à gauche |
-| `frame_w`, `frame_h` | entier | 1 … 10000 | taille de l'image analysée |
-| `snapshot_path` | chaîne \| `null` | 255 caractères max | chemin local de la capture, `null` si aucune |
+**`CONTROL_MOTORS`** (03_CONTRAT § 3.A) : 1 à 6 ordres simultanés. `motor_id` vaut de 0 à 5 et doit être unique dans le
+message. `direction` vaut `CW` ou `CCW`, `angle_deg` de 1 à 3600, `speed_rpm` de 1 à 15 (maximum du 28BYJ-48).
 
 ```json
-{"v":1,"ts":1791194420.5,"label":"person","confidence":0.87,"bbox":[120,40,200,380],"frame_w":640,"frame_h":480,"snapshot_path":"snapshots/20261005-120020.jpg"}
+{"action":"CONTROL_MOTORS","commands":[{"motor_id":0,"direction":"CW","angle_deg":90,"speed_rpm":12},
+                                       {"motor_id":1,"direction":"CCW","angle_deg":180,"speed_rpm":8},
+                                       {"motor_id":4,"direction":"CW","angle_deg":45,"speed_rpm":15}]}
 ```
 
-## 5. Contraintes côté ESP8266
+**`EMERGENCY_STOP_ALL`** (03_CONTRAT § 3.B) : coupe toutes les bobines.
 
-- **NTP obligatoire avant TLS.** BearSSL vérifie les dates de validité du certificat : sans heure, la connexion échoue. Le Pi sert l'heure (NTP sur `192.168.10.1`, port 123/udp ouvert sur `wlan0`). Attendre `time(nullptr) > 1704067200` avant de se connecter et avant de publier un `ts`.
-- **CA à embarquer** : `mosquitto/certs/ca_cert.h`, généré par `scripts/gen-certs.sh` sur le Pi. Il est propre à chaque Pi et n'est pas dans Git. Le certificat serveur contient aussi `192.168.10.1` en nom DNS, car BearSSL ne compare que les noms DNS du SAN.
-- **BearSSL** (`WiFiClientSecure` de l'ESP8266) : TLS 1.2, suites ECDHE-ECDSA (AES-GCM, ChaCha20). Réduire les tampons TLS avec `setBufferSizes(512, 512)` si `probeMaxFragmentLength()` réussit, sinon garder les valeurs par défaut (~ 17 Ko de RAM). La poignée de main ECDSA prend ~1 à 2 s : ne pas se reconnecter en boucle serrée.
-- **RAM limitée** (~40 Ko libres) : payloads **< 512 octets**, `PubSubClient::setBufferSize(512)`, pas de `String` concaténée en boucle (préférer `snprintf` dans un tampon fixe).
-- **MQ-2 sur A0** : l'entrée ADC du module ESP-12 est limitée à **~1,0 V**, alors que le MQ-2 (alimenté en 5 V) sort jusqu'à ~5 V. Il faut un **pont diviseur** :
-  - ESP-12 nu : R1 = 39 kΩ (série) / R2 = 10 kΩ (vers GND), soit 5 V → 1,02 V ;
-  - NodeMCU / Wemos D1 mini (diviseur interne 220 k/100 k déjà présent) : ajouter ~180 kΩ en série, soit 5 V → 1,0 V à l'ADC.
-  - Prévoir le préchauffage du MQ-2 (1 à 2 min après mise sous tension, et 24 h de rodage au premier usage) avant de déclencher des alertes `gas_high`.
-- **DHT22** : une lecture toutes les 2 s maximum. En cas de `NaN`, envoyer `null` et une alerte `sensor_fault`.
-- `client_id` MQTT = `device_id` (`sentinel-01`). Keepalive 30 à 60 s.
+```json
+{"action":"EMERGENCY_STOP_ALL"}
+```
 
-## 6. Exemple Arduino (ESP8266, PubSubClient + BearSSL)
+**`TRIGGER_ALARM`** (03_SPECIFICATION § 2.B) : `state` (booléen). `color` et `sound` sont facultatifs : codes en
+majuscules, chiffres et `_`, 32 caractères max.
 
-Bibliothèques : core ESP8266 ≥ 3.1, `PubSubClient` (knolleary). Les identifiants vont dans `secrets.h`, **non versionné**.
+```json
+{"action":"TRIGGER_ALARM","state":true,"color":"RED","sound":"SIREN_ALERT"}
+```
+
+L'ESP32 doit ignorer toute action inconnue. L'exécution réelle se constate dans la télémétrie suivante (`actuators_state`).
+
+### 5.2 `sentinel/access/response` (QoS 1)
+
+```json
+{"card_uid":"A3:5F:B2:1C","access_granted":true,"user_name":"Ingenieur Lucas Delon",
+ "clearance_level":"LEVEL_4_AETHERCORP","auto_unlock_door":true}
+```
+
+Badge refusé (inconnu ou révoqué) :
+
+```json
+{"card_uid":"E8:AF:75:3B:02:C8:8E","access_granted":false,"user_name":null,"clearance_level":null,"auto_unlock_door":false}
+```
+
+Si `access_granted` et `auto_unlock_door` valent `true`, l'ESP32 ouvre le sas (moteur 1), passe la LED RGB en vert et
+affiche `user_name` sur l'OLED. Sinon : LED rouge, sas fermé.
+
+## 6. Adaptations nécessaires du firmware `04_FIRMWARE_ESP32_COMPLET`
+
+Le firmware actuel ne peut pas se connecter au broker sécurisé. Corrections minimales :
+
+| Problème dans `04` | Correction |
+|---|---|
+| `WiFiClient` + port **1883**, connexion **anonyme** | `WiFiClientSecure` + `setCACert(SENTINEL_CA_PEM)`, port **8883**, `connect("SENTINEL-X-CORE", "esp32", MQTT_PASS)` |
+| Mot de passe Wi-Fi écrit en dur dans le code | le déplacer dans un `secrets.h` ajouté au `.gitignore` du firmware |
+| Tampon PubSubClient de 256 octets par défaut : la télémétrie complète (~450 o) n'est **jamais envoyée** | `mqttClient.setBufferSize(1024);` |
+| `timestamp = millis()` | NTP : `configTime(0, 0, "192.168.10.1")`, puis `time(nullptr)` |
+| Lecture du DHT à chaque tour de `loop()` | toutes les 2 s minimum (contrainte du DHT22) ; `null` si `NaN` |
+| `sentinel/commands` et `sentinel/access/response` sont abonnés mais jamais traités | `mqttClient.setCallback(...)` (exemple ci-dessous) |
+| Abonnements faits sans vérifier le succès de `connect()` | se réabonner seulement si `connect()` renvoie `true`, avec une attente entre les essais |
+| Capteur MQ alimenté en **5 V** sur GPIO 34 (**3,3 V max**) | **pont diviseur obligatoire** sur AO (ex. 10 kΩ en série, 20 kΩ vers GND : 5 V → 3,3 V), sinon l'entrée ADC est détruite |
+
+Connexion TLS et traitement des messages (ESP32, Arduino) :
 
 ```cpp
-#include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h>   // BearSSL
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
-#include <time.h>
-#include "ca_cert.h"            // généré par scripts/gen-certs.sh (SENTINEL_CA_PEM)
-#include "secrets.h"            // WIFI_SSID, WIFI_PASS, MQTT_PASS — hors Git
+#include <ArduinoJson.h>
+#include "ca_cert.h"      // généré sur le Pi par scripts/gen-certs.sh (SENTINEL_CA_PEM)
+#include "secrets.h"      // WIFI_SSID, WIFI_PASSWORD, MQTT_PASS — hors Git
 
-static const char* MQTT_HOST = "192.168.10.1";
-static const uint16_t MQTT_PORT = 8883;
-static const char* DEVICE_ID = "sentinel-01";
-static const char* FW = "1.0.0";
-static const char* T_TELEMETRY = "sentinel/sentinel-01/telemetry";
-static const char* T_ALERTS    = "sentinel/sentinel-01/alerts";
-static const char* T_STATUS    = "sentinel/sentinel-01/status";
-static const char* T_CMD       = "sentinel/sentinel-01/cmd/#";
-static const char* LWT         = "{\"v\":1,\"state\":\"offline\"}";
+WiFiClientSecure tlsClient;
+PubSubClient mqttClient(tlsClient);
 
-BearSSL::X509List trustAnchor(SENTINEL_CA_PEM);
-BearSSL::WiFiClientSecure tls;
-PubSubClient mqtt(tls);
-uint32_t seq = 0;
-
-void onCommand(char* topic, byte* payload, unsigned int len) {
-  // Ex. : parser avec ArduinoJson, vérifier "v":1, puis piloter buzzer / LED.
-  Serial.printf("cmd %s : %.*s\n", topic, len, (const char*)payload);
-}
-
-void waitForNtp() {
-  configTime("CET-1CEST,M3.5.0,M10.5.0/3", MQTT_HOST, "pool.ntp.org");
-  while (time(nullptr) < 1704067200) delay(200);   // NTP obligatoire avant TLS
-}
-
-void connectMqtt() {
-  while (!mqtt.connected()) {
-    // client_id, user, pass, willTopic, willQos, willRetain, willMessage
-    if (mqtt.connect(DEVICE_ID, "esp_sentinel-01", MQTT_PASS, T_STATUS, 1, true, LWT)) {
-      char buf[128];
-      snprintf(buf, sizeof buf, "{\"v\":1,\"state\":\"online\",\"ip\":\"%s\",\"fw\":\"%s\"}",
-               WiFi.localIP().toString().c_str(), FW);
-      mqtt.publish(T_STATUS, buf, true);              // retained
-      mqtt.subscribe(T_CMD, 1);
-    } else {
-      Serial.printf("MQTT rc=%d, TLS err=%d\n", mqtt.state(), tls.getLastSSLError());
-      delay(5000);
-    }
+void onMessage(char* topic, byte* payload, unsigned int len) {
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, len)) return;                 // JSON invalide : ignoré
+  if (strcmp(topic, "sentinel/access/response") == 0) {
+    if (doc["access_granted"] && doc["auto_unlock_door"]) { /* moteur 1 : ouvrir le sas, LED verte, OLED */ }
+    else { /* LED rouge */ }
+  } else if (strcmp(topic, "sentinel/commands") == 0) {
+    const char* action = doc["action"] | "";
+    if (!strcmp(action, "EMERGENCY_STOP_ALL")) { /* couper toutes les bobines */ }
+    else if (!strcmp(action, "OPERATE_MOTOR"))  { /* doc["target"], doc["command"], doc["duration_ms"] */ }
+    else if (!strcmp(action, "CONTROL_MOTORS")) { for (JsonObject c : doc["commands"].as<JsonArray>()) { /* ... */ } }
+    else if (!strcmp(action, "TRIGGER_ALARM"))  { /* doc["state"], doc["color"], doc["sound"] */ }
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) delay(200);
-  waitForNtp();
-  tls.setTrustAnchors(&trustAnchor);                  // vérifie la chaîne + le nom "192.168.10.1"
-  if (tls.probeMaxFragmentLength(MQTT_HOST, MQTT_PORT, 512)) tls.setBufferSizes(512, 512);
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt.setBufferSize(512);
-  mqtt.setKeepAlive(30);
-  mqtt.setCallback(onCommand);
+void setupMqtt() {
+  configTime(0, 0, "192.168.10.1");             // NTP servi par le Pi
+  tlsClient.setCACert(SENTINEL_CA_PEM);          // vérifie le certificat du broker
+  mqttClient.setServer("192.168.10.1", 8883);
+  mqttClient.setBufferSize(1024);
+  mqttClient.setCallback(onMessage);
 }
 
-void loop() {
-  connectMqtt();
-  mqtt.loop();
-  static uint32_t last = 0;
-  if (millis() - last >= 5000) {
-    last = millis();
-    float t = NAN, h = NAN;            // lire le DHT22 ici
-    int gas = analogRead(A0);          // 0..1023 (via pont diviseur !)
-    bool motion = digitalRead(D5);     // PIR
-    char tbuf[16], hbuf[16], buf[256];
-    if (isnan(t)) strcpy(tbuf, "null"); else dtostrf(t, 1, 1, tbuf);
-    if (isnan(h)) strcpy(hbuf, "null"); else dtostrf(h, 1, 1, hbuf);
-    snprintf(buf, sizeof buf,
-      "{\"v\":1,\"device_id\":\"%s\",\"ts\":%ld,\"seq\":%lu,\"temperature_c\":%s,\"humidity_pct\":%s,"
-      "\"gas_raw\":%d,\"motion\":%s,\"rssi_dbm\":%d,\"uptime_s\":%lu}",
-      DEVICE_ID, (long)time(nullptr), (unsigned long)seq++, tbuf, hbuf, gas,
-      motion ? "true" : "false", WiFi.RSSI(), (unsigned long)(millis() / 1000));
-    mqtt.publish(T_TELEMETRY, buf);    // QoS 0 (PubSubClient ne publie qu'en QoS 0)
+void ensureMqtt() {
+  static unsigned long lastTry = 0;
+  if (mqttClient.connected() || millis() - lastTry < 5000) return;
+  lastTry = millis();
+  if (mqttClient.connect("SENTINEL-X-CORE", "esp32", MQTT_PASS)) {
+    mqttClient.subscribe("sentinel/commands", 1);
+    mqttClient.subscribe("sentinel/access/response", 1);
   }
 }
 ```
 
-> **PubSubClient publie uniquement en QoS 0.** Pour respecter le QoS 1 des `alerts` et du `status`, deux options :
-> utiliser une bibliothèque qui le gère (ex. `arduino-mqtt` de 256dpi ou `AsyncMqttClient`), ou republier l'alerte
-> tant qu'elle n'apparaît pas côté serveur. La Last Will, elle, est bien en QoS 1 et retained (paramètres de `connect`).
+> PubSubClient publie uniquement en QoS 0. Pour les alertes, l'envoi par `POST /api/v1/alerts` (réponse `201`)
+> donne un accusé de réception fiable : voir [API.md § 4](API.md).
 
-## 7. Exemple Python (paho-mqtt 2.x) — script de vision / API
+## 7. Script IA caméra (`sentinel/vision/events`, compte `vision`)
+
+Ce flux ne figure pas dans les spécifications ESP32 : il est conservé pour le script de vision du Pi.
+
+| Champ | Type | Valeurs |
+|---|---|---|
+| `ts` | nombre | epoch en secondes (décimales acceptées) |
+| `label` | chaîne | 1–64 car., ex. `person` |
+| `confidence` | nombre | 0 … 1 |
+| `bbox` | tableau | `[x, y, w, h]` en pixels, nombres ≥ 0, dans l'image |
+| `frame_w`, `frame_h` | entier | 1 … 10000 |
+| `snapshot_path` | chaîne \| `null` | facultatif, 255 car. max |
 
 ```python
 import json, ssl, time
@@ -259,39 +259,17 @@ import paho.mqtt.client as mqtt
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sentinel-vision")
 client.username_pw_set("vision", "<MQTT_PASS_VISION du .env>")
-client.tls_set(ca_certs="mosquitto/certs/ca.crt", tls_version=ssl.PROTOCOL_TLS_CLIENT)  # vérifie CA + nom
-client.connect("192.168.10.1", 8883, keepalive=60)
+client.tls_set(ca_certs="mosquitto/certs/ca.crt", tls_version=ssl.PROTOCOL_TLS_CLIENT)
+client.connect("192.168.10.1", 8883)
 client.loop_start()
-
-event = {"v": 1, "ts": round(time.time(), 3), "label": "person", "confidence": 0.87,
-         "bbox": [120, 40, 200, 380], "frame_w": 640, "frame_h": 480, "snapshot_path": None}
-client.publish("sentinel/vision/events", json.dumps(event, separators=(",", ":")), qos=1).wait_for_publish()
+event = {"ts": time.time(), "label": "person", "confidence": 0.87, "bbox": [120, 40, 200, 380],
+         "frame_w": 640, "frame_h": 480, "snapshot_path": None}
+client.publish("sentinel/vision/events", json.dumps(event), qos=1).wait_for_publish()
 client.loop_stop(); client.disconnect()
-```
-
-Abonnement (compte `api`, lecture de tout `sentinel/#`) :
-
-```python
-def on_message(_c, _u, msg):
-    print(msg.topic, json.loads(msg.payload))
-
-sub = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="sentinel-api")
-sub.username_pw_set("api", "<MQTT_PASS_API>")
-sub.tls_set(ca_certs="mosquitto/certs/ca.crt", tls_version=ssl.PROTOCOL_TLS_CLIENT)
-sub.on_connect = lambda c, *_: c.subscribe("sentinel/#", qos=1)
-sub.on_message = on_message
-sub.connect("192.168.10.1", 8883)
-sub.loop_forever()
-```
-
-Envoi d'une commande (compte `api`) :
-
-```python
-client.publish("sentinel/sentinel-01/cmd/buzzer", '{"v":1,"state":"on","duration_s":5}', qos=1)
 ```
 
 ## 8. Évolution du contrat
 
-1. Ajout d'un champ **optionnel** : compatible, `v` inchangé (les consommateurs ignorent les champs inconnus).
-2. Renommage, suppression ou changement de type/unité : **`v` = 2**. L'ingestor doit accepter v1 et v2 pendant la migration du firmware.
-3. Toute modification passe par une PR qui met à jour ce document **et** `ingestor/validation.py` (et ses tests).
+1. Ajout d'un champ **facultatif** : compatible, aucun changement côté serveur (les champs inconnus sont ignorés).
+2. Renommage, suppression, changement de type ou d'unité : accord de l'équipe, puis mise à jour **dans la même PR** de ce
+   document, de `ingestor/validation.py`, de `api/app/models.py`, de leurs tests et de `scripts/smoke-test.sh`.
