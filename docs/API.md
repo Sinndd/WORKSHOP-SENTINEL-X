@@ -352,17 +352,17 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 fonctionne donc sur le Wi-Fi de la table, même sans Internet. Connexion par compte (identifiant + mot de passe, double
 authentification facultative) ; la session est conservée uniquement pour l'onglet (`sessionStorage`).
 
-**Identité « terminal »** vert/noir façon salle de contrôle (inspirée de WorldMonitor) : police JetBrains Mono embarquée,
-panneaux en fenêtres de terminal, léger effet CRT. Les courbes utilisent un vert validé pour le fond sombre, les statuts
+**Identité** « centre de commandement » : fond bleu nuit, panneaux translucides, accent cyan ; polices Inter, Space
+Grotesk et JetBrains Mono (chiffres) embarquées. Les courbes utilisent un bleu validé pour le fond sombre, les statuts
 gardent leurs couleurs réservées avec icône et libellé.
 
 | Zone | Contenu |
 |---|---|
-| Barre d'état | sections (touches **1** à **4**), horloges locale et UTC, palette de commandes **Ctrl-K / ⌘K**, compte connecté |
+| Barre d'état | sections (touches **1** à **4**), horloges locale et UTC, recherche de commandes **Ctrl-K / ⌘K**, compte connecté |
 | Bandeau défilant | état du module, dernières mesures et derniers événements (pause au survol) |
 | Relevés | valeur actuelle + min/moy/max de la période : température, humidité, gaz, présence, alertes non acquittées, Wi-Fi |
 | Commandes | sas, alarme, **arrêt d'urgence en deux clics** (armer puis confirmer sous 5 s), état des actionneurs |
-| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **vert** nominal, **ambre** présence ou avertissement, **rouge** alerte critique / gaz / surchauffe, **éteint** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer |
+| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **cyan** nominal, **ambre** présence ou avertissement, **rouge** alerte critique / gaz / surchauffe, **éteint** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer |
 | Flux d'événements | alertes, passages RFID et commandes, fusionnés par ordre chronologique |
 | Caméra IA | dernière image de la webcam (YOLO) |
 | Courbes | température, humidité, pic de gaz, présence. Curseur synchronisé sur les 4 courbes, flèches ← → au clavier |
