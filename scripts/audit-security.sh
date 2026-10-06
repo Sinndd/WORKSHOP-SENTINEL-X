@@ -18,12 +18,12 @@ env_get() { grep -m1 "^$1=" .env | cut -d= -f2- | tr -d '\r' | sed 's/ *#.*//;s/
 section() { echo; echo "== $*"; }
 
 section "1. Surface exposée"
-published="$($DC ps --format '{{.Ports}}' | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | sort -u | tr '\n' ' ')"
+published="$($DC ps --format '{{.Ports}}' | grep -oE '0\.0\.0\.0:[0-9]+' | cut -d: -f2 | sort -nu | tr '\n' ' ')"
 echo "ports publiés sur l'hôte : $published"
-check "seuls 8000 (API/dashboard) et 8883 (MQTTS) sont publiés" test "$published" = "8000 8883 "
+check "seuls 80/443 (proxy HTTPS), 123 (NTP) et 8883 (MQTTS) sont publiés ; l'API (8000) ne l'est pas" test "$published" = "80 123 443 8883 "
 check "PostgreSQL non publié sur l'hôte" bash -c "! $DC ps --format '{{.Ports}}' | grep -q '5432->'"
 check "MQTT en clair (1883) non publié" bash -c "! $DC ps --format '{{.Ports}}' | grep -q '1883->'"
-for svc in api mosquitto postgres ingestor; do
+for svc in proxy ntp api mosquitto postgres ingestor; do
   cid="$($DC ps -q $svc)"
   check "$svc : racine en lecture seule, no-new-privileges, toutes capacités retirées" \
     bash -c "docker inspect $cid --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.SecurityOpt}} {{.HostConfig.CapDrop}}' | grep -q 'true .*no-new-privileges.* \[ALL\]'"

@@ -153,8 +153,8 @@ services:
       context: .                  # api/ + dashboard/ (cf. .dockerignore : liste blanche, aucun secret)
       dockerfile: api/Dockerfile
     image: sentinel/api:2.2.0
-    ports:
-      - "${API_BIND_ADDR:-0.0.0.0}:${API_PORT:-8000}:8000"
+    # Aucun port publié : l'API n'est joignable que par le proxy HTTPS (réseau interne backend).
+    expose: ["8000"]
     environment:
       TZ: ${TZ:-Europe/Paris}
       PGHOST: postgres
@@ -181,13 +181,13 @@ services:
       IP_BLOCKING: ${IP_BLOCKING:-off}
       IP_FAIL_THRESHOLD: ${IP_FAIL_THRESHOLD:-20}
       IP_BLOCK_MIN: ${IP_BLOCK_MIN:-15}
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.30.0.10}   # IP fixe du proxy : seule source de confiance pour X-Forwarded-For
       MOTOR_COUNT: "6"
     volumes:
       - { type: bind, source: ./mosquitto/certs/ca.crt, target: /certs/ca.crt, read_only: true, bind: { create_host_path: false } }
     tmpfs:
       - /tmp:size=8m
-    networks: [frontend, backend]
+    networks: [backend]
     depends_on:
       postgres: { condition: service_started }
       mosquitto: { condition: service_started }
@@ -199,11 +199,64 @@ services:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8000/health || exit 1"]
       start_period: 15s
 
+  # Serveur NTP pour l'ESP8266 (UDP 123) : l'ESP et le Pi partagent ainsi la même heure, sans Internet.
+  # Si chrony tourne déjà sur l'hôte avec `allow`, il occupe 123/udp : choisir un autre NTP_BIND_ADDR/NTP_PORT
+  # (le firmware attend 123) ou garder un seul des deux.
+  ntp:
+    <<: *hardening
+    build: ./chrony
+    image: sentinel/ntp:1.0.0
+    ports:
+      - "${NTP_BIND_ADDR:-0.0.0.0}:${NTP_PORT:-123}:123/udp"
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"   # chrony (non-root) peut écouter sur 123/udp
+    networks: [frontend]
+    mem_limit: 16m
+    cpus: 0.2
+    pids_limit: 8
+
+  # Reverse proxy HTTPS (Caddy) : seul point d'entrée web. Termine le TLS (certificat de la CA interne),
+  # redirige 80 -> 443, route tout vers l'API (/api, /dashboard, /docs, /health) et pose HSTS / limites de requêtes.
+  proxy:
+    <<: *hardening
+    image: caddy:2.10-alpine
+    user: "${PUID:?lancer ./scripts/gen-env.sh}:${PGID:?lancer ./scripts/gen-env.sh}"   # lit server.key (0600) comme Mosquitto
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    ports:
+      - "${PROXY_BIND_ADDR:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+      - "${PROXY_BIND_ADDR:-0.0.0.0}:${HTTP_PORT:-80}:80"
+    environment:
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    volumes:
+      - { type: bind, source: ./caddy/Caddyfile, target: /etc/caddy/Caddyfile, read_only: true, bind: { create_host_path: false } }
+      - { type: bind, source: ./mosquitto/certs/server.crt, target: /certs/server.crt, read_only: true, bind: { create_host_path: false } }
+      - { type: bind, source: ./mosquitto/certs/server.key, target: /certs/server.key, read_only: true, bind: { create_host_path: false } }
+    tmpfs:
+      - /tmp:size=16m
+    cap_add: [NET_BIND_SERVICE]   # le binaire caddy porte cette capacité de fichier : sans elle, exec échoue (cap_drop ALL)
+    networks:
+      frontend: {}
+      backend:
+        ipv4_address: 172.30.0.10                # IP fixe (cf. TRUSTED_PROXIES de l'API)
+    depends_on:
+      api: { condition: service_healthy }
+    mem_limit: 48m
+    cpus: 0.5
+    pids_limit: 32
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/health || exit 1"]
+      start_period: 10s
+
 networks:
   # Réseau interne : pas de route vers l'extérieur (DB + ingestor).
   backend:
     internal: true
-  # Réseau exposé : seuls Mosquitto (8883) et l'API publient un port.
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  # Réseau exposé : seuls Mosquitto (8883), le proxy HTTPS (80/443) et le NTP (123/udp) publient un port.
   frontend: {}
 
 volumes:

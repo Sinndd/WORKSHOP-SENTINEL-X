@@ -306,7 +306,7 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
-  pinMode(PIN_PIR, INPUT);
+  pinMode(PIN_PIR, INPUT_PULLDOWN_16);  // GPIO16 : sans pull-down la broche flotte (lit HIGH si le PIR est débranché)
   pinMode(PIN_RGB_R, OUTPUT);
   pinMode(PIN_RGB_G, OUTPUT);
   pinMode(PIN_RGB_B, OUTPUT);

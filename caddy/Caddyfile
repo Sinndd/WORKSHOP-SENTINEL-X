@@ -1,0 +1,56 @@
+# Reverse proxy SENTINEL-X : seul point d'entrée web (80 -> 443). L'API n'est pas publiée.
+{
+	admin off                 # pas d'API d'administration Caddy
+	auto_https off            # certificats fournis par la CA interne (scripts/gen-certs.sh), pas d'ACME
+	persist_config off
+	servers {
+		protocols h1 h2          # pas de HTTP/3 (UDP 443 non publié)
+		max_header_size 16KB
+		timeouts {
+			read_header 10s
+			read_body 30s
+			write 60s
+			idle 2m
+		}
+	}
+}
+
+# Sonde de santé du conteneur (127.0.0.1 uniquement, jamais publiée) : vérifie aussi que l'API répond.
+http://127.0.0.1:8081 {
+	bind 127.0.0.1
+	handle /health {
+		reverse_proxy api:8000
+	}
+	respond 404
+}
+
+http://:80 {
+	redir https://{host}{uri} 308
+}
+
+https://:443 {
+	tls /certs/server.crt /certs/server.key {
+		protocols tls1.2 tls1.3
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Snapshots caméra : 2 Mio max côté API ; on coupe plus tôt au niveau du proxy.
+	request_body {
+		max_size 3MB
+	}
+
+	@root path /
+	redir @root /dashboard/ 308
+
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-Proto {scheme}
+		health_uri /health
+		health_interval 15s
+	}
+}

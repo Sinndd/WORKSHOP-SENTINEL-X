@@ -1,0 +1,20 @@
+# Surcharge pour tester la stack sur un poste de DEV sous podman rootless + SELinux (Fedora) — pas pour le Pi (Docker).
+#   docker compose -f docker-compose.yml -f docker-compose.podman.yml up -d
+# - label=disable : SELinux refuse sinon l'accès aux montages ;
+# - user 0:0 : en rootless, « root » du conteneur = votre utilisateur (lit server.key en 0600) ;
+# - ports > 1024 : un utilisateur ne peut pas lier 80/443/123 (HTTPS sur 8443, redirection HTTP sur 8080, NTP sur 12300).
+services:
+  mosquitto: { security_opt: ["label=disable"], user: "0:0" }
+  postgres:  { security_opt: ["label=disable"] }
+  ingestor:  { security_opt: ["label=disable"] }
+  api:       { security_opt: ["label=disable"] }
+  proxy:
+    security_opt: ["label=disable"]
+    user: "0:0"
+    ports: !override
+      - "0.0.0.0:8443:443"
+      - "0.0.0.0:8080:80"
+  ntp:
+    security_opt: ["label=disable"]
+    ports: !override
+      - "0.0.0.0:12300:123/udp"

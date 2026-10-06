@@ -3,8 +3,8 @@
 API REST du PC Serveur Local (Raspberry Pi) : alertes, télémétrie, contrôle d'accès RFID et commandes
 superviseur du module ESP32. Code dans [`api/`](../api), schémas dans [`api/app/models.py`](../api/app/models.py).
 
-- **Tableau de bord d'analyse** (React) : `http://192.168.10.1:8000/dashboard/` (§ 9)
-- **Documentation interactive** (essayer les requêtes depuis le navigateur) : `http://192.168.10.1:8000/docs`
+- **Tableau de bord d'analyse** (React) : `https://192.168.10.1/dashboard/` (§ 9)
+- **Documentation interactive** (essayer les requêtes depuis le navigateur) : `https://192.168.10.1/docs`
 - **Spécification OpenAPI** générée depuis le code : [`docs/openapi.json`](openapi.json) (§ 9 pour la régénérer)
 - **Contrat MQTT** (topics et messages de l'ESP32) : [`docs/CONTRAT-MQTT.md`](CONTRAT-MQTT.md)
 
@@ -14,7 +14,7 @@ superviseur du module ESP32. Code dans [`api/`](../api), schémas dans [`api/app
 
 | | |
 |---|---|
-| URL de base | `http://192.168.10.1:8000` (Wi-Fi de la table, 192.168.10.0/24 uniquement) |
+| URL de base | `https://192.168.10.1` (Wi-Fi de la table, 192.168.10.0/24 uniquement) |
 | Format | JSON (`Content-Type: application/json`), UTF-8 |
 | Dates en sortie | ISO 8601 avec fuseau, ex. `2026-10-05T14:27:02.199371+02:00` |
 | Authentification | en-tête `Authorization: Bearer <jeton>` sur toutes les routes `/api/v1/*` |
@@ -30,11 +30,14 @@ Les deux jetons sont générés aléatoirement par `./scripts/gen-env.sh` dans l
 
 ```bash
 set -a; . ./.env; set +a          # sur le Pi, charge API_TOKEN et API_DEVICE_TOKEN
-API=http://192.168.10.1:8000
+API=https://192.168.10.1
 ```
 
-> L'API est en HTTP simple, joignable uniquement depuis le Wi-Fi WPA2 de la table (pare-feu UFW + `DOCKER-USER`).
-> Les jetons circulent donc en clair sur ce réseau. Passer l'API en HTTPS avec la CA interne est une évolution possible.
+> L'API est servie en **HTTPS sur le port 443** par le proxy Caddy (le conteneur `api` n'est pas publié ; `http://` sur le port 80 redirige vers HTTPS) avec un certificat signé par la CA interne `mosquitto/certs/ca.crt` (la même que pour MQTTS), joignable uniquement
+> depuis le Wi-Fi de la table (pare-feu UFW + `DOCKER-USER`). Avec `curl`, ajouter `--cacert mosquitto/certs/ca.crt` ; dans le navigateur,
+> importer `ca.crt` comme autorité de certification de confiance (sinon avertissement). Le certificat couvre `192.168.10.1`, `sentinel.local`
+> et les IP de `SENTINEL_EXTRA_IPS` : si on accède par une autre adresse, l'ajouter dans `.env` puis relancer `./scripts/gen-certs.sh`.
+> Les jetons ne circulent donc plus en clair. Côté ESP, utiliser `WiFiClientSecure` avec la CA (`setTrustAnchors`) pour tout appel HTTP.
 
 ---
 
@@ -124,7 +127,7 @@ Côté ESP32 (Arduino, `HTTPClient`) :
 
 ```cpp
 HTTPClient http;
-http.begin("http://192.168.10.1:8000/api/v1/alerts");
+http.begin("https://192.168.10.1/api/v1/alerts");
 http.addHeader("Content-Type", "application/json");
 http.addHeader("Authorization", String("Bearer ") + API_DEVICE_TOKEN);   // dans secrets.h, hors Git
 int code = http.POST(payload);   // 201 attendu ; 422 = payload non conforme (voir le corps de la réponse)
@@ -348,7 +351,7 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 
 ## 9. Tableau de bord
 
-`http://192.168.10.1:8000/dashboard/` : page React servie par l'API elle-même, sans conteneur ni ressource externe. Elle
+`https://192.168.10.1/dashboard/` : page React servie par l'API elle-même, sans conteneur ni ressource externe. Elle
 fonctionne donc sur le Wi-Fi de la table, même sans Internet. Connexion par compte (identifiant + mot de passe, double
 authentification facultative) ; la session est conservée uniquement pour l'onglet (`sessionStorage`).
 
@@ -392,7 +395,7 @@ Code dans [`dashboard/`](../dashboard) (Vite + React + TypeScript). L'image Dock
 | Journaux | `docker compose logs -f api` |
 | Tests unitaires (sans base) | voir l'en-tête de [`api/tests/test_api.py`](../api/tests/test_api.py) |
 | Test de bout en bout | `./scripts/smoke-test.sh` (32 vérifications, dont tout le circuit RFID) |
-| Tableau de bord en direct (rechargement à chaud) | `cd dashboard && npm install && API_URL=http://192.168.10.1:8000 npm run dev` puis `http://localhost:5173/dashboard/` |
+| Tableau de bord en direct (rechargement à chaud) | `cd dashboard && npm install && API_URL=https://192.168.10.1 npm run dev` puis `http://localhost:5173/dashboard/` |
 | Régénérer `docs/openapi.json` | `docker run --rm -e API_TOKEN=x -e API_DEVICE_TOKEN=x -e MQTT_PASSWORD=x sentinel/api:2.1.0 python -c "import json; from app.main import app; print(json.dumps(app.openapi(), ensure_ascii=False, indent=2))" > docs/openapi.json` |
 
 Organisation du code :
@@ -409,7 +412,7 @@ Organisation du code :
 | `../dashboard/scripts/convert-model.mjs` | conversion FBX -> GLB du modèle de Wall-E (`npm run model`) |
 
 Contraintes du conteneur à respecter lors d'une évolution : utilisateur non-root, système de fichiers en lecture
-seule (`/tmp` seul inscriptible), port 8000, route `/health` conservée, `mem_limit: 128m`. La consommation mesurée
+seule (`/tmp` seul inscriptible), port 8000 (interne, derrière le proxy Caddy), route `/health` conservée, `mem_limit: 128m`. La consommation mesurée
 est de 44 Mo.
 
 Le contexte de build de l'API est la **racine du dépôt** (pour inclure `dashboard/`). Le fichier `.dockerignore` racine est une

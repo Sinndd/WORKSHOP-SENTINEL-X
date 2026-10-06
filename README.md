@@ -13,8 +13,8 @@ Le Pi sert aussi de point d'accès Wi-Fi 2.4 GHz (`wlan0`, 192.168.10.0/24) et e
 Documentation :
 - **[docs/CONTRAT-MQTT.md](docs/CONTRAT-MQTT.md)** : contrat MQTT v2 (source de vérité ESP32 ↔ serveur) ;
 - **[docs/SECURITE.md](docs/SECURITE.md)** : comptes personnels, rôles, 2FA, verrouillage, blocage d'IP et détection d'intrusion ;
-- **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `:8000/docs`) ;
-- **tableau de bord** (React, hologramme 3D de Wall-E) : `http://192.168.10.1:8000/dashboard/`. Avant le premier build : `cd dashboard && npm install && npm run model` (modèle 3D non versionné, cf. docs/API.md § 9).
+- **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `https://192.168.10.1/docs`) ;
+- **tableau de bord** (React, hologramme 3D de Wall-E) : `https://192.168.10.1/dashboard/`. Avant le premier build : `cd dashboard && npm install && npm run model` (modèle 3D non versionné, cf. docs/API.md § 9).
 
 ---
 
@@ -55,11 +55,11 @@ flowchart LR
   ESP["ESP32 SENTINEL-X-CORE<br/>RFID, capteurs, 6 moteurs"] -- "MQTTS 8883<br/>wlan0" --> MQ
   ESP -- "POST /api/v1/alerts" --> API
   IA["Script vision IA<br/>(hôte, webcam USB)"] -- "MQTTS 8883" --> MQ
-  DASH["Dashboard / clients<br/>192.168.10.0/24"] -- "HTTP 8000" --> API
+  DASH["Dashboard / clients<br/>192.168.10.0/24"] -- "HTTPS 443" --> PROXY
   subgraph Docker["Docker (Raspberry Pi)"]
     subgraph FE["réseau frontend"]
       MQ["mosquitto<br/>:8883 publié"]
-      API["api FastAPI + dashboard React<br/>:8000 publié"]
+      PROXY["proxy Caddy<br/>:443 publié (80 redirige)"] --> API["api FastAPI + dashboard React<br/>interne, non publié"]
     end
     subgraph BE["réseau backend (internal: true)"]
       ING["ingestor"]
@@ -77,7 +77,9 @@ flowchart LR
 | `mosquitto` | `eclipse-mosquitto:2.1.2-alpine` | frontend, backend | **8883/tcp** (MQTTS) | UID de l'hôte (`PUID`) | 32 Mo |
 | `postgres` | `postgres:17.11-alpine3.24` | backend | — | `70` (postgres) | 160 Mo |
 | `ingestor` | build `./ingestor` (`python:3.13.16-alpine3.24`) | backend | — | `10001` | 64 Mo |
-| `api` | build `api/Dockerfile` (FastAPI + dashboard React compilé, `python:3.13.16-alpine3.24`) | frontend, backend | **8000/tcp** | `10002` | 128 Mo |
+| `api` | build `api/Dockerfile` (FastAPI + dashboard React compilé, `python:3.13.16-alpine3.24`) | backend | *aucun (interne, derrière le proxy)* | `10002` | 128 Mo |
+| `proxy` | `caddy:2.10-alpine` (reverse proxy HTTPS, TLS 1.2+, HSTS, HTTP→HTTPS) | frontend, backend | **443/tcp**, 80/tcp (redirection) | UID de l'hôte (`PUID`) | 48 Mo |
+| `ntp` | build `chrony/Dockerfile` (serveur NTP local pour l'ESP) | frontend | **123/udp** | `chrony` | 16 Mo |
 
 - **backend** est `internal: true`, donc sans route vers l'extérieur. Mosquitto et l'API y sont aussi rattachés pour joindre la base et l'ingestor.
 - **frontend** porte les deux seuls ports publiés. **PostgreSQL n'est jamais publié.**
@@ -144,8 +146,8 @@ l'objectif de 150 Mo. Si le disque ou la RAM manquent, voir la variante SQLite (
 | API | jetons Bearer distincts (opérateur / appareil), comparés en temps constant ; le jeton d'appareil ne permet que `POST /api/v1/alerts`. Validation stricte des entrées (422), commandes moteurs bornées (`motor_id`, `speed_rpm`…) avant publication, journal des commandes et des accès. |
 | Base de données | superuser réservé à l'init et aux sauvegardes ; `sentinel_app` (SELECT/INSERT/UPDATE) et `sentinel_ro` (SELECT, `default_transaction_read_only`) ; `statement_timeout` ; `CONNECT` révoqué pour `PUBLIC`. |
 | Conteneurs | non-root, `cap_drop: [ALL]` (aucune capacité réajoutée), `no-new-privileges`, `read_only: true` + `tmpfs`, `pids_limit`, limites CPU/RAM, images épinglées (jamais `latest`), aucun socket Docker monté. |
-| Réseaux | `backend` interne ; seuls 8883 et 8000 publiés. |
-| Pare-feu hôte | UFW deny incoming. Ouvertures depuis `wlan0`/192.168.10.0/24 uniquement (SSH, 8883, API, DHCP/DNS/NTP du point d'accès), SSH limité depuis `eth0`. **Docker contourne UFW** pour les ports publiés : `harden-host.sh` ajoute des règles dans la chaîne `DOCKER-USER` (`/etc/ufw/after.rules`). |
+| Réseaux | `backend` interne ; seuls 8883 (MQTTS), 443/80 (proxy HTTPS) et 123/udp (NTP) publiés ; l'API n'est jamais exposée directement. |
+| Pare-feu hôte | UFW deny incoming. Ouvertures depuis `wlan0`/192.168.10.0/24 uniquement (SSH, 8883, 443/80, NTP, DHCP/DNS du point d'accès), SSH limité depuis `eth0`. **Docker contourne UFW** pour les ports publiés : `harden-host.sh` ajoute des règles dans la chaîne `DOCKER-USER` (`/etc/ufw/after.rules`). |
 | SSH | clés uniquement, root interdit, `MaxAuthTries 3`. Drop-in `01-…` prioritaire sur un éventuel `50-cloud-init.conf`. Retour arrière automatique sans confirmation sous 120 s. |
 | Groupe `docker` | `harden-host.sh` liste ses membres : appartenir à ce groupe revient à être root. N'y ajouter personne sans nécessité. |
 | Montages | syntaxe longue avec `create_host_path: false` : si un certificat ou un secret manque, le démarrage échoue explicitement au lieu de créer un dossier vide. |
@@ -181,7 +183,7 @@ mosquitto_pub -h 192.168.10.1 -p 8883 --cafile $CA -u esp32 -P "$MQTT_PASS_ESP32
 Envoyer une commande (passe par l'API, qui valide et publie sur `sentinel/commands`) :
 
 ```bash
-curl -X POST http://192.168.10.1:8000/api/v1/commands -H "Authorization: Bearer $API_TOKEN" \
+curl -X POST https://192.168.10.1/api/v1/commands -H "Authorization: Bearer $API_TOKEN" \
   -H 'Content-Type: application/json' -d '{"action":"EMERGENCY_STOP_ALL"}'
 ```
 
@@ -271,7 +273,7 @@ docker compose logs --tail 50 mosquitto       # connexions, refus d'authentifica
 | Équipe | Ce qu'il faut récupérer |
 |---|---|
 | **Firmware ESP32** | `mosquitto/certs/ca_cert.h` (généré sur le Pi), `MQTT_PASS_ESP32` et `API_DEVICE_TOKEN` du `.env` (à mettre dans un `secrets.h` non versionné). **Adaptations obligatoires du firmware `04`** (TLS 8883, authentification, tampon de 1024 octets, traitement des commandes, pont diviseur du capteur MQ) : [contrat § 6](docs/CONTRAT-MQTT.md). |
-| **API / Dashboard (DEV)** | [docs/API.md](docs/API.md), `http://192.168.10.1:8000/docs` et le tableau de bord `/dashboard/` (code dans `dashboard/`). Jeton `API_TOKEN`. Pour faire évoluer l'API : code dans `api/app/`, contraintes du conteneur en fin de `docs/API.md`. |
+| **API / Dashboard (DEV)** | [docs/API.md](docs/API.md), `https://192.168.10.1/docs` et le tableau de bord `/dashboard/` (code dans `dashboard/`). Jeton `API_TOKEN`. Pour faire évoluer l'API : code dans `api/app/`, contraintes du conteneur en fin de `docs/API.md`. |
 | **IA** | Historique de la télémétrie : `GET /api/v1/telemetry` (jeton `API_TOKEN`). Caméra : MQTTS vers `127.0.0.1:8883` ou `192.168.10.1:8883`, compte `vision`, CA `mosquitto/certs/ca.crt`, topic `sentinel/vision/events` ([contrat § 7](docs/CONTRAT-MQTT.md)). |
 
 Changer un mot de passe ou un jeton : modifier la valeur dans `.env`, relancer `./scripts/gen-env.sh` (régénère `passwd`),
@@ -324,3 +326,18 @@ Mise en œuvre prévue (sur demande) : un fichier `docker-compose.sqlite.yml` qu
 │   ├── status.sh  backup-db.sh  smoke-test.sh
 └── docs/                       # CONTRAT-MQTT.md (v2), API.md, openapi.json
 ```
+
+## Installation en une commande (Pi sans Internet, Docker compris)
+
+```bash
+# 1. Sur une machine CONNECTÉE (même suite Debian que le Pi : grep VERSION_CODENAME /etc/os-release)
+./scripts/bundle-offline.sh --suite trixie        # -> sentinel-offline-trixie-arm64.tar.gz (~1 Go : Docker, ufw, fail2ban, images, dépôt)
+# 2. Copier ce fichier sur le Pi (clé USB / scp), puis sur le Pi (Raspberry Pi OS Lite 64-bit, utilisateur avec sudo) :
+tar xzf sentinel-offline-trixie-arm64.tar.gz && cd sentinel-offline && ./install.sh
+```
+
+`install.sh --bundle` : vérifie l'intégrité du paquet, installe hors ligne Docker Engine, le plugin compose, ufw et fail2ban
+(`scripts/install-debs.sh` : seuls les paquets absents sont installés, aucune mise à jour système partielle), charge les images,
+génère secrets et certificats, durcit l'hôte, lance la stack et audite. Sans Internet : pas de mises à jour de sécurité automatiques
+(refaire un paquet et le réinstaller de temps en temps) et heure à régler (module RTC DS3231 ou `sudo date -s`) car les certificats TLS en dépendent.
+Émulation arm64 si la machine de préparation n'est pas un arm64 : `docker run --privileged --rm tonistiigi/binfmt --install arm64`.

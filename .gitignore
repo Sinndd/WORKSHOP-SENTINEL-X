@@ -30,3 +30,7 @@ secrets.h
 # Source FBX à la racine ; le GLB est régénéré par : cd dashboard && npm run model
 *.fbx
 dashboard/public/models/*.glb
+
+# --- Paquet hors ligne (scripts/bundle-offline.sh) ---
+sentinel-offline-*.tar.gz
+sentinel-offline-*.tar.gz.sha256
