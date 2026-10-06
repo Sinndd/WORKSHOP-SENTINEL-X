@@ -25,3 +25,8 @@ __pycache__/
 # --- Firmware : secrets de l'appareil ---
 secrets.h
 !secrets.h.example
+
+# --- Modèle 3D (Wall-E © Disney/Pixar : non diffusé dans le dépôt) ---
+# Source FBX à la racine ; le GLB est régénéré par : cd dashboard && npm run model
+*.fbx
+dashboard/public/models/*.glb
