@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { download, fetchSnapshot, getJson, postJson, Unauthorized } from "./api";
 import type { PaletteCommand } from "./components/CommandPalette";
@@ -251,15 +252,18 @@ function CameraInset({ token, expanded, onToggle }: { token: string; expanded: b
     return () => { cancelled = true; clearInterval(id); };
   }, [token]);
   return (
-    <div className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}`}
+    // Animation de mise en page (Motion) : la fenêtre grandit depuis son coin. À l'agrandissement elle part
+    // avec un léger retard pour que Wall-E prenne de l'avance ; à la réduction elle se rétracte d'abord.
+    <motion.div layout transition={{ layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: expanded ? 0.12 : 0 } }}
+         className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}`}
          aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={onToggle}>
-      {live && src ? <img src={src} alt="Image en direct de la caméra IA" /> : <Icon name="cam" size={expanded ? 34 : 22} />}
-      <span className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? "Live" : "Offline"}</span>
-      <button type="button" className="cam-toggle" onClick={onToggle} aria-pressed={expanded}
+      {live && src ? <motion.img layout src={src} alt="Image en direct de la caméra IA" /> : <motion.span layout="position" className="cam-icon"><Icon name="cam" size={expanded ? 34 : 22} /></motion.span>}
+      <motion.span layout="position" className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? "Live" : "Offline"}</motion.span>
+      <motion.button layout="position" type="button" className="cam-toggle" onClick={onToggle} aria-pressed={expanded}
               title={expanded ? "Réduire la caméra" : "Agrandir la caméra"} aria-label={expanded ? "Réduire la caméra" : "Agrandir la caméra"}>
         <Icon name={expanded ? "shrink" : "expand"} size={14} />
-      </button>
-    </div>
+      </motion.button>
+    </motion.div>
   );
 }
 
@@ -371,7 +375,7 @@ function Dashboard({
               {/* La scène 3D se resserre à gauche quand la caméra est agrandie : Wall-E se recentre dans l'espace restant. */}
               <div className="holo-stage">
                 <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
-                  <Hologram mode={mode} presence={presence} />
+                  <Hologram mode={mode} presence={presence} shifted={camExpanded} />
                 </Suspense>
                 <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
               </div>

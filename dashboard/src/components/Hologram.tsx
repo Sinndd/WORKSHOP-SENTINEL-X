@@ -204,6 +204,25 @@ function Projector({ mode }: { mode: HoloMode }) {
   );
 }
 
+/** Décale le cadrage (et recule légèrement) sans redimensionner le canvas : Wall-E glisse en continu
+ *  vers le quart gauche quand la caméra IA est agrandie, puis revient au centre. */
+function FramingShift({ shifted }: { shifted: boolean }) {
+  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  useFrame((_, dt) => {
+    const targetOffset = shifted ? camera.getFilmWidth() * 0.25 : 0;   // décalage de 25 % de la largeur
+    const targetZoom = shifted ? 0.72 : 1;                                // recul : marge avec la vidéo, même en rotation
+    const k = REDUCED_MOTION ? 1 : 1 - Math.exp(-dt * 7);                  // lissage exponentiel (~0,4 s)
+    const offset = THREE.MathUtils.lerp(camera.filmOffset, targetOffset, k);
+    const zoom = THREE.MathUtils.lerp(camera.zoom, targetZoom, k);
+    if (Math.abs(offset - camera.filmOffset) > 1e-4 || Math.abs(zoom - camera.zoom) > 1e-4) {
+      camera.filmOffset = offset;
+      camera.zoom = zoom;
+      camera.updateProjectionMatrix();
+    }
+  });
+  return null;
+}
+
 function Controls() {
   const { camera, gl } = useThree();
   const controls = useMemo(() => {
@@ -230,7 +249,7 @@ class WebGLBoundary extends Component<{ fallback: ReactNode; children: ReactNode
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export default function Hologram({ mode, presence }: { mode: HoloMode; presence: boolean }) {
+export default function Hologram({ mode, presence, shifted = false }: { mode: HoloMode; presence: boolean; shifted?: boolean }) {
   const [model, setModel] = useState<THREE.Group | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -250,6 +269,7 @@ export default function Hologram({ mode, presence }: { mode: HoloMode; presence:
               aria-label={`Hologramme de Wall-E, état ${mode}`}>
         <Projector mode={mode} />
         {model && <WallE model={model} mode={mode} presence={presence} />}
+        <FramingShift shifted={shifted} />
         <Controls />
       </Canvas>
       {!model && <div className="holo-fallback">Initialisation de l'hologramme…</div>}
