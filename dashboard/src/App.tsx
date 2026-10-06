@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import AccountView, { PasswordForm, ROLE_LABELS } from "./Account";
+import BadgesView from "./Badges";
 import { getJson, loginApi, OtpRequired, send, Unauthorized, type Session } from "./api";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette";
 import { Icon } from "./components/ui";
@@ -10,7 +11,7 @@ import type { Me } from "./types";
 import UsersView from "./Users";
 
 const SESSION_KEY = "sentinel.apiToken";   // sessionStorage : effacé à la fermeture de l'onglet
-type View = "supervision" | "users" | "security" | "account";
+type View = "supervision" | "badges" | "users" | "security" | "account";
 
 function readToken(): string {
   try { return sessionStorage.getItem(SESSION_KEY) ?? ""; } catch { return ""; }
@@ -70,10 +71,11 @@ export default function App() {
   const isAdmin = me?.role === "admin";
   const tabs = useMemo(() => ([
     { id: "supervision" as View, label: "Supervision", show: true },
+    { id: "badges" as View, label: "Badges", show: me?.role === "admin" || me?.role === "operator" },
     { id: "security" as View, label: "Sécurité", show: isAdmin },
     { id: "users" as View, label: "Utilisateurs", show: isAdmin },
     { id: "account" as View, label: "Mon compte", show: true },
-  ]).filter((t) => t.show), [isAdmin]);
+  ]).filter((t) => t.show), [isAdmin, me?.role]);
 
   const ready = Boolean(token && me && !me.must_change_password);
 
@@ -164,6 +166,7 @@ export default function App() {
       {view === "supervision" && <Supervision token={token} canOperate={me.role !== "viewer"} onExpired={onExpired}
                                               onCommands={setViewCommands} />}
       <main className="page" hidden={view === "supervision"}>
+        {view === "badges" && me.role !== "viewer" && <BadgesView token={token} onExpired={onExpired} />}
         {view === "security" && isAdmin && <SecurityView token={token} onExpired={onExpired} />}
         {view === "users" && isAdmin && <UsersView token={token} me={me} onExpired={onExpired} />}
         {view === "account" && <AccountView token={token} me={me} onChanged={loadMe} onExpired={onExpired} />}

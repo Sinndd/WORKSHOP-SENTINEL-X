@@ -18,7 +18,7 @@
 
 | Compte | Utilisé par | Publie | S'abonne |
 |---|---|---|---|
-| `esp32` | module ESP32 | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/access` | `sentinel/commands`, `sentinel/access/response` |
+| `esp32` | module ESP32 | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/access`, `sentinel/enroll` | `sentinel/commands`, `sentinel/access/response` |
 | `ingestor` | ingestion → PostgreSQL | — | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/vision/events` |
 | `api` | API REST | `sentinel/commands`, `sentinel/access/response` | `sentinel/#` |
 | `vision` | script IA caméra | `sentinel/vision/events` | — |
@@ -31,6 +31,7 @@
 | `sentinel/alerts` | ESP32 → serveur | 1 | sur événement | ingestor (aussi possible en `POST /api/v1/alerts`) |
 | `sentinel/access` | ESP32 → serveur | 1 | à chaque badge | API (décision d'accès) |
 | `sentinel/access/response` | serveur → ESP32 | 1 | en réponse à `sentinel/access` | firmware |
+| `sentinel/enroll` | ESP32 → serveur | 0 | pendant un enrôlement de badge | API (§ 4.4) |
 | `sentinel/commands` | serveur → ESP32 | 1 | sur ordre (`POST /api/v1/commands`) | firmware |
 | `sentinel/vision/events` | script IA → serveur | 1 | sur détection | ingestor |
 
@@ -123,6 +124,22 @@ La trame minimale réellement émise par le firmware `04` est acceptée :
 L'API vérifie que le badge est enregistré et actif (`PUT /api/v1/badges/{uid}`), journalise le passage et répond
 sur `sentinel/access/response` (§ 5.2) en moins d'une seconde.
 
+### 4.4 `sentinel/enroll` — résultat d'un enrôlement de badge
+
+Émis par l'ESP32 après un ordre `ENROLL_BADGE` (§ 5.3). L'API rattache alors le badge à l'utilisateur de la demande.
+
+| Champ | Type | Obligatoire | Valeurs |
+|---|---|---|---|
+| `node_id` | chaîne | oui | |
+| `enroll_id` | entier ≥ 1 | oui | celui de l'ordre reçu |
+| `status` | chaîne | oui | `SUCCESS` (badge écrit), `ATTEMPT_FAILED` (un badge a échoué, le mode écriture continue), `TIMEOUT`, `CANCELLED` |
+| `card_uid` | chaîne | si `SUCCESS` | comme § 4.3 |
+| `error` | chaîne | non | 200 car. max |
+
+```json
+{"node_id":"SENTINEL-X-CORE","enroll_id":12,"status":"SUCCESS","card_uid":"43:4B:51:07"}
+```
+
 ## 5. Messages reçus par l'ESP32
 
 ### 5.1 `sentinel/commands` (QoS 1)
@@ -159,6 +176,18 @@ majuscules, chiffres et `_`, 32 caractères max.
 ```
 
 L'ESP32 doit ignorer toute action inconnue. L'exécution réelle se constate dans la télémétrie suivante (`actuators_state`).
+
+### 5.3 Ordres d'enrôlement (`sentinel/commands`, QoS 1)
+
+Publiés par l'API (`POST /api/v1/enrollments`, depuis la page « Badges » du tableau de bord), jamais par `POST /api/v1/commands`.
+
+```json
+{"action":"ENROLL_BADGE","enroll_id":12,"duration_s":30}
+{"action":"ENROLL_CANCEL","enroll_id":12}
+```
+
+`ENROLL_BADGE` : l'ESP32 passe en mode écriture pendant `duration_s` secondes (10 à 120) et écrit le premier badge présenté (cf. `docs/BADGES.md`) ;
+il répond sur `sentinel/enroll` (§ 4.4). `ENROLL_CANCEL` le fait quitter ce mode.
 
 ### 5.2 `sentinel/access/response` (QoS 1)
 

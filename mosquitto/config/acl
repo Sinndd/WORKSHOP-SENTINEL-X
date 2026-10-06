@@ -6,6 +6,7 @@ user esp32
 topic write sentinel/telemetry
 topic write sentinel/alerts
 topic write sentinel/access
+topic write sentinel/enroll
 topic read  sentinel/commands
 topic read  sentinel/access/response
 

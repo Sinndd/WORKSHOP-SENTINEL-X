@@ -349,6 +349,16 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 
 ---
 
+### Enrôlement de badges (page « Badges » du tableau de bord)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `POST` | `/api/v1/enrollments` | opérateur : démarre le mode écriture de l'ESP32 (`user_name`, `clearance_level`, `auto_unlock_door`, `duration_s` 10-120) ; 409 si un enrôlement est déjà en cours |
+| `GET` | `/api/v1/enrollments/{id}` | état : `PENDING`, `SUCCESS` (avec `card_uid`), `TIMEOUT`, `CANCELLED`, `FAILED` |
+| `DELETE` | `/api/v1/enrollments/{id}` | annule un enrôlement en cours |
+
+Le badge écrit est rattaché automatiquement à l'utilisateur (table `badges`). Détails : `docs/BADGES.md`, topic `sentinel/enroll` : `docs/CONTRAT-MQTT.md` § 4.4.
+
 ## 9. Tableau de bord
 
 `https://192.168.10.1/dashboard/` : page React servie par l'API elle-même, sans conteneur ni ressource externe. Elle

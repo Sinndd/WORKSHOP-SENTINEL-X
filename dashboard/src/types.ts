@@ -153,3 +153,28 @@ export interface SecuritySummary {
 }
 
 export interface BlockedIp { ip: string; remaining_s: number; }
+
+export interface BadgeRow {
+  card_uid: string;
+  user_name: string;
+  clearance_level: string;
+  auto_unlock_door: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type EnrollStatus = "PENDING" | "SUCCESS" | "FAILED" | "TIMEOUT" | "CANCELLED";
+
+export interface Enrollment {
+  id: number;
+  user_name: string;
+  clearance_level: string;
+  auto_unlock_door: boolean;
+  status: EnrollStatus;
+  card_uid: string | null;
+  error: string | null;
+  created_at: string;
+  expires_at: string;
+  finished_at: string | null;
+}

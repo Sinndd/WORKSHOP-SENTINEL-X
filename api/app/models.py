@@ -153,7 +153,37 @@ class BadgeIn(Strict):
     active: bool = True
 
 
+class EnrollIn(Strict):
+    """Demande d'enrôlement : l'ESP32 passe en mode écriture, le premier badge présenté est rattaché à user_name."""
+    user_name: Annotated[str, Field(min_length=1, max_length=128)]
+    clearance_level: Annotated[str, Field(min_length=1, max_length=64)] = "LEVEL_1"
+    auto_unlock_door: bool = True
+    duration_s: Annotated[int, Field(ge=10, le=120)] = 30
+
+
+class EnrollResult(Strict):
+    """Message de l'ESP32 sur sentinel/enroll."""
+    node_id: NodeId
+    enroll_id: Annotated[int, Field(ge=1)]
+    status: Literal["SUCCESS", "ATTEMPT_FAILED", "TIMEOUT", "CANCELLED"]
+    card_uid: CardUid | None = None
+    error: Annotated[str, Field(max_length=200)] | None = None
+
+
 # --- Réponses ---------------------------------------------------------------------------
+class EnrollmentOut(BaseModel):
+    id: int
+    user_name: str
+    clearance_level: str
+    auto_unlock_door: bool
+    status: str
+    card_uid: str | None
+    error: str | None
+    created_at: datetime
+    expires_at: datetime
+    finished_at: datetime | None
+
+
 class AlertOut(BaseModel):
     id: int
     node_id: str

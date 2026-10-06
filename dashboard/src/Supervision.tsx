@@ -4,6 +4,7 @@ import { download, fetchSnapshot, getJson, postJson, Unauthorized } from "./api"
 import type { PaletteCommand } from "./components/CommandPalette";
 import type { HoloMode } from "./components/Hologram";
 import { LineChart, type Point } from "./components/LineChart";
+import { QuickEnroll } from "./Badges";
 import { Card, Icon, StatTile, StatusBadge, type Status } from "./components/ui";
 import { ago, dateTime, num } from "./format";
 import type { AccessEvent, Aggregate, Alert, CommandLog, Device, Severity, Telemetry } from "./types";
@@ -201,7 +202,7 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
         {data && (
           <Dashboard
             data={data} online={online} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
-            unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token}
+            unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token} onExpired={onExpired}
             onAck={acknowledge} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
           />
         )}
@@ -313,11 +314,12 @@ interface DashboardProps {
   onEmergencyStop: () => void;
   canOperate: boolean;
   token: string;
+  onExpired: () => void;
 }
 
 function Dashboard({
   data, online, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
-  onAirlock, onAlarm, onEmergencyStop, canOperate, token,
+  onAirlock, onAlarm, onEmergencyStop, canOperate, token, onExpired,
 }: DashboardProps) {
   const { agg, latest, alerts, access, commands } = data;
   const s = agg.summary;
@@ -431,6 +433,8 @@ function Dashboard({
             <EmergencyButton onConfirm={onEmergencyStop} disabled={!canOperate} />
           </fieldset>
         </Card>
+
+        {canOperate && <QuickEnroll token={token} onExpired={onExpired} />}
 
         <Card title="Flux d'événements" icon="pulse">
           <ul className="feed" aria-label="Derniers événements">
