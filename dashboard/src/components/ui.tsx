@@ -26,6 +26,10 @@ const PATHS: Record<string, string> = {
   cam: "M2 5h8a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM11 7.2l4-1.7v5l-4-1.7",
   bolt: "M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z",
   log: "M3 2.5h10v11H3zM5.5 5.5h5M5.5 8h5M5.5 10.5h3",
+  cube: "M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7zM2.5 4.5L8 7.5l5.5-3M8 7.5v7",
+  pulse: "M1.5 8h3l1.5-4 3 8 1.5-4h4",
+  gauge: "M2.5 11a5.5 5.5 0 1 1 11 0M8 11l3-3.5",
+  chart: "M2 13.5h12M3.5 11l3-4 2.5 2 4-5.5",
 };
 
 export function Icon({ name, size = 16 }: { name: keyof typeof PATHS | string; size?: number }) {

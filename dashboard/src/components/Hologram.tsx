@@ -1,8 +1,8 @@
 // Hologramme 3D de Wall-E (React Three Fiber + Three.js), piloté par l'état du module SENTINEL-X.
-//   nominal  : vert, regard qui balaie lentement
+//   nominal  : cyan, regard qui balaie lentement
 //   warning  : ambre, tête qui scrute vite (présence détectée)
 //   critical : rouge, tête agitée, projection instable
-//   offline  : vert éteint, tête baissée, projection qui décroche
+//   offline  : bleu acier éteint, tête baissée, projection qui décroche
 // Modèle : public/models/wall-e.glb (généré par scripts/convert-model.mjs) avec les nœuds body / neck > head, eyes.
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -13,10 +13,10 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 export type HoloMode = "nominal" | "warning" | "critical" | "offline";
 
 const COLORS: Record<HoloMode, string> = {
-  nominal: "#39ff7a",
+  nominal: "#38e1ff",
   warning: "#ffb000",
   critical: "#ff3b3b",
-  offline: "#2f6b45",
+  offline: "#3a5468",
 };
 const MODEL_URL = `${import.meta.env.BASE_URL}models/wall-e.glb`;
 const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -235,11 +235,11 @@ export default function Hologram({ mode, presence }: { mode: HoloMode; presence:
     let alive = true;
     new GLTFLoader().loadAsync(MODEL_URL)
       .then((gltf) => { if (alive) setModel(gltf.scene); })
-      .catch(() => { if (alive) setError("MODÈLE ABSENT\nnpm run model (dashboard/) puis reconstruire l'image"); });
+      .catch(() => { if (alive) setError("Modèle 3D absent\nGénérer avec « npm run model » (dossier dashboard), puis reconstruire l'image"); });
     return () => { alive = false; };
   }, []);
 
-  const fallback = <div className="holo-fallback">HOLO-PROJECTEUR INDISPONIBLE{"\n"}WebGL non pris en charge par ce navigateur</div>;
+  const fallback = <div className="holo-fallback">Hologramme indisponible{"\n"}WebGL n'est pas pris en charge par ce navigateur</div>;
   if (error) return <div className="holo-fallback">{error}</div>;
   return (
     <WebGLBoundary fallback={fallback}>
@@ -250,7 +250,7 @@ export default function Hologram({ mode, presence }: { mode: HoloMode; presence:
         {model && <WallE model={model} mode={mode} presence={presence} />}
         <Controls />
       </Canvas>
-      {!model && <div className="holo-fallback">INITIALISATION DU PROJECTEUR…</div>}
+      {!model && <div className="holo-fallback">Initialisation de l'hologramme…</div>}
     </WebGLBoundary>
   );
 }

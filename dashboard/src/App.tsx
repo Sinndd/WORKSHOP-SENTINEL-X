@@ -12,14 +12,6 @@ import UsersView from "./Users";
 const SESSION_KEY = "sentinel.apiToken";   // sessionStorage : effacé à la fermeture de l'onglet
 type View = "supervision" | "users" | "security" | "account";
 
-const BANNER = String.raw`
-███████╗███████╗███╗   ██╗████████╗██╗███╗   ██╗███████╗██╗          ██╗  ██╗
-██╔════╝██╔════╝████╗  ██║╚══██╔══╝██║████╗  ██║██╔════╝██║          ╚██╗██╔╝
-███████╗█████╗  ██╔██╗ ██║   ██║   ██║██╔██╗ ██║█████╗  ██║    █████╗ ╚███╔╝
-╚════██║██╔══╝  ██║╚██╗██║   ██║   ██║██║╚██╗██║██╔══╝  ██║    ╚════╝ ██╔██╗
-███████║███████╗██║ ╚████║   ██║   ██║██║ ╚████║███████╗███████╗     ██╔╝ ██╗
-╚══════╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝     ╚═╝  ╚═╝`.slice(1);
-
 function readToken(): string {
   try { return sessionStorage.getItem(SESSION_KEY) ?? ""; } catch { return ""; }
 }
@@ -29,6 +21,8 @@ function storeToken(token: string | null) {
     else sessionStorage.removeItem(SESSION_KEY);
   } catch { /* stockage indisponible */ }
 }
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const initials = (name: string) => name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
 const typingInField = (e: KeyboardEvent) =>
   e.target instanceof HTMLElement && (["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName) || e.target.isContentEditable);
 
@@ -108,12 +102,10 @@ export default function App() {
     return (
       <div className="login-wrapper">
         <div className="card gate login-card">
-          <div className="body" style={{ paddingTop: 16 }}>
-            {meError ? <>
-              <div className="alert-banner error-banner" role="alert">{meError}</div>
-              <button className="btn btn-block" onClick={loadMe}>Réessayer</button>
-            </> : <p className="muted cursor">Chargement de la session</p>}
-          </div>
+          {meError ? <>
+            <div className="alert-banner error-banner" role="alert">{meError}</div>
+            <button className="btn btn-block" onClick={loadMe}>Réessayer</button>
+          </> : <p className="muted" style={{ textAlign: "center", margin: 0 }}>Chargement de la session…</p>}
         </div>
       </div>
     );
@@ -123,15 +115,14 @@ export default function App() {
     return (
       <div className="login-wrapper">
         <div className="card gate login-card">
-          <header className="card-head"><h2>Première connexion</h2></header>
           <div className="login-header">
-            <h2>CHOISISSEZ VOTRE MOT DE PASSE</h2>
+            <span className="logo big" aria-hidden><Icon name="shield" size={26} /></span>
+            <span className="corp-tag">Première connexion</span>
+            <h2>Nouveau mot de passe</h2>
             <p className="sub">Le mot de passe temporaire doit être remplacé avant d'accéder au système.</p>
           </div>
-          <div className="body">
-            <PasswordForm token={token} username={me.username} onDone={loadMe} onExpired={onExpired} />
-            <div className="login-toggle"><button className="link-button" onClick={logout}>Se déconnecter</button></div>
-          </div>
+          <PasswordForm token={token} username={me.username} onDone={loadMe} onExpired={onExpired} />
+          <div className="login-toggle"><button className="link-button" onClick={logout}>Se déconnecter</button></div>
         </div>
       </div>
     );
@@ -142,8 +133,8 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <span className="logo" aria-hidden><Icon name="shield" size={16} /></span>
-            <div className="brand-text"><strong className="glow">SENTINEL-X</strong><span>AetherCorp // centre de supervision</span></div>
+            <span className="logo" aria-hidden><Icon name="shield" size={18} /></span>
+            <div className="brand-text"><strong>SENTINEL-X</strong><span>AetherCorp · Centre de supervision</span></div>
           </div>
           <nav className="tabs" aria-label="Sections">
             {tabs.map((t, i) => (
@@ -155,10 +146,15 @@ export default function App() {
           </nav>
           <span className="spacer" />
           <Clock />
-          <button className="kbd-hint" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K">Ctrl-K commandes</button>
+          <button className="kbd-hint" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K">
+            Rechercher une commande<kbd>{IS_MAC ? "⌘ K" : "Ctrl K"}</kbd>
+          </button>
           <div className="user-badge" title={`${me.username} — ${ROLE_LABELS[me.role]}`}>
-            <span className="user-name">{me.username}</span>
-            <span className="role-tag">{me.service ? "service" : ROLE_LABELS[me.role]}</span>
+            <span className="avatar" aria-hidden>{initials(me.full_name || me.username)}</span>
+            <span className="user-meta">
+              <span className="user-name">{me.full_name || me.username}</span>
+              <span className="role-tag">{me.service ? "Compte de service" : ROLE_LABELS[me.role]}</span>
+            </span>
           </div>
           <button className="btn btn-sm btn-ghost" onClick={logout}>Déconnexion</button>
         </div>
@@ -182,16 +178,8 @@ function Clock() {
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
   const local = now.toLocaleTimeString("fr-FR");
   const utc = now.toISOString().slice(11, 19);
-  return <span className="clock" role="timer" aria-label={`Heure locale ${local}, UTC ${utc}`}><b>{local}</b> LOC · {utc} UTC</span>;
+  return <span className="clock" role="timer" aria-label={`Heure locale ${local}, UTC ${utc}`}><b>{local}</b> · {utc} UTC</span>;
 }
-
-const BOOT_LINES: { text: string; tone?: "ok" | "warn" }[] = [
-  { text: "AETHERCORP BIOS v4.2 — module SENTINEL-X" },
-  { text: "[ OK ] liaison MQTTS 8883 (TLS 1.2, CA interne)", tone: "ok" },
-  { text: "[ OK ] base de télémétrie montée", tone: "ok" },
-  { text: "[ OK ] holo-projecteur WALL-E MK2 en veille", tone: "ok" },
-  { text: "[WARN] accès restreint — chaque connexion est journalisée", tone: "warn" },
-];
 
 function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Session) => void }) {
   const [username, setUsername] = useState("");
@@ -222,37 +210,36 @@ function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Se
   return (
     <div className="login-wrapper">
       <motion.form className="card gate login-card" onSubmit={submit}
-                   initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-        <header className="card-head"><h2>Terminal d'accès</h2><span className="card-actions">tty1 · session sécurisée</span></header>
-        <h1 style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", margin: 0 }}>SENTINEL-X</h1>
-        <pre className="ascii glow" aria-hidden>{BANNER}</pre>
-        <div className="boot">
-          {BOOT_LINES.map((l, i) => (
-            <motion.div key={l.text} className={l.tone} initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                        transition={{ delay: 0.15 + i * 0.18, duration: 0.01 }}>{l.text}</motion.div>
-          ))}
+                   initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                   transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
+        <div className="login-header">
+          <motion.span className="logo big" aria-hidden initial={{ rotate: -12, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }}
+                       transition={{ delay: 0.1, duration: 0.5 }}><Icon name="shield" size={26} /></motion.span>
+          <span className="corp-tag">AetherCorp Industrial Solutions</span>
+          <h1 style={{ margin: 0 }}><span className="login-title">SENTINEL-X</span></h1>
+          <p className="sub">Centre de supervision · accès réservé aux personnes autorisées</p>
         </div>
 
-        <div className="body">
+        <div>
           {notice && !error && <div className="alert-banner warn-banner" role="status">{notice}</div>}
           {error && <div className="alert-banner error-banner" role="alert">{error}</div>}
 
           {!needOtp ? (
             <>
               <div className="field-group">
-                <label htmlFor="login-user">login</label>
+                <label htmlFor="login-user">Identifiant</label>
                 <input id="login-user" type="text" autoComplete="username" value={username} autoFocus required spellCheck={false}
                        onChange={(e) => setUsername(e.target.value)} />
               </div>
               <div className="field-group">
-                <label htmlFor="login-pass">password</label>
+                <label htmlFor="login-pass">Mot de passe</label>
                 <input id="login-pass" type="password" autoComplete="current-password" value={password} required
                        onChange={(e) => setPassword(e.target.value)} />
               </div>
             </>
           ) : (
             <div className="field-group">
-              <label htmlFor="login-otp">code de double authentification</label>
+              <label htmlFor="login-otp">Code de double authentification</label>
               <input id="login-otp" inputMode="numeric" autoComplete="one-time-code" placeholder="6 chiffres" value={otp}
                      autoFocus required onChange={(e) => setOtp(e.target.value)} />
             </div>
@@ -269,6 +256,7 @@ function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Se
             </div>
           )}
         </div>
+        <div className="login-foot"><span>Liaison chiffrée</span><span>Connexions journalisées</span></div>
       </motion.form>
     </div>
   );
