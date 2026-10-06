@@ -234,7 +234,7 @@ const CAMERA_MAX_AGE_MS = 15_000;   // au-delà, la dernière image est considé
 
 /** Incrustation caméra (coin de l'hologramme) : « Live » si le script IA envoie des images récentes, sinon « Offline ».
  *  L'image est chargée en blob car le jeton ne peut pas passer par un simple <img src>. */
-function CameraInset({ token }: { token: string }) {
+function CameraInset({ token, expanded, onToggle }: { token: string; expanded: boolean; onToggle: () => void }) {
   const [src, setSrc] = useState<string | null>(null);
   const [live, setLive] = useState(false);
   useEffect(() => {
@@ -251,9 +251,14 @@ function CameraInset({ token }: { token: string }) {
     return () => { cancelled = true; clearInterval(id); };
   }, [token]);
   return (
-    <div className={`cam-pip ${live ? "is-live" : "is-offline"}`} aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`}>
-      {live && src ? <img src={src} alt="Image en direct de la caméra IA" /> : <Icon name="cam" size={22} />}
+    <div className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}`}
+         aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={onToggle}>
+      {live && src ? <img src={src} alt="Image en direct de la caméra IA" /> : <Icon name="cam" size={expanded ? 34 : 22} />}
       <span className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? "Live" : "Offline"}</span>
+      <button type="button" className="cam-toggle" onClick={onToggle} aria-pressed={expanded}
+              title={expanded ? "Réduire la caméra" : "Agrandir la caméra"} aria-label={expanded ? "Réduire la caméra" : "Agrandir la caméra"}>
+        <Icon name={expanded ? "shrink" : "expand"} size={14} />
+      </button>
     </div>
   );
 }
@@ -329,6 +334,7 @@ function Dashboard({
   const granted = access.filter((a) => a.access_granted).length;
   const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT, height: 170 };
   const hasRange = s.samples > 0;
+  const [camExpanded, setCamExpanded] = useState(false);
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
 
   const gasHigh = (latest?.gas_raw_ppm ?? 0) >= GAS_HIGH;
@@ -361,12 +367,15 @@ function Dashboard({
           <Card title="Hologramme · Wall-E MK2" icon="cube" className={`mode-${mode}`}
                 actions={<StatusBadge status={mode === "nominal" ? "good" : mode === "warning" ? "warning" : mode === "critical" ? "critical" : "neutral"}>
                   {MODE_LABEL[mode]}</StatusBadge>}>
-            <div className="holo flush">
-              <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
-                <Hologram mode={mode} presence={presence} />
-              </Suspense>
-              <CameraInset token={token} />
-              <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
+            <div className={`holo flush${camExpanded ? " cam-expanded" : ""}`}>
+              {/* La scène 3D se resserre à gauche quand la caméra est agrandie : Wall-E se recentre dans l'espace restant. */}
+              <div className="holo-stage">
+                <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
+                  <Hologram mode={mode} presence={presence} />
+                </Suspense>
+                <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
+              </div>
+              <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} />
             </div>
           </Card>
         </div>
