@@ -316,7 +316,7 @@ td.num, th.num { text-align: right; }
 .holo canvas { display: block; touch-action: none; }
 .holo-col .card.mode-critical { border-color: rgba(208, 59, 59, 0.6); box-shadow: var(--shadow), 0 0 40px rgba(208, 59, 59, 0.18); }
 .holo-col .card.mode-warning { border-color: rgba(250, 178, 25, 0.5); }
-.holo-col .card.mode-nominal { border-color: rgba(56, 225, 255, 0.25); }
+.holo-col .card.mode-nominal { border-color: rgba(53, 240, 138, 0.28); }
 .hud { position: absolute; pointer-events: none; font-size: 11px; color: var(--text-muted); line-height: 1.7; }
 .hud > div { display: flex; gap: 8px; }
 .hud.tr > div, .hud.br > div { justify-content: flex-end; }
