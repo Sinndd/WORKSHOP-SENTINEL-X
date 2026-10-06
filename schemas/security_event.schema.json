@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sentinel-x:schema:security-event:v1",
+  "title": "SENTINEL-X Security Event",
+  "type": "object",
+  "required": ["event_id", "timestamp", "type", "zone", "severity", "details"],
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "type": {
+      "type": "string",
+      "enum": [
+        "ssh_failed_login",
+        "mqtt_auth_failure",
+        "unauthorized_access",
+        "brute_force_detected",
+        "firewall_block",
+        "network_scan"
+      ]
+    },
+    "zone": { "type": "string", "minLength": 1 },
+    "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "source_ip": { "type": ["string", "null"] },
+    "details": { "type": "object" }
+  },
+  "additionalProperties": true
+}
