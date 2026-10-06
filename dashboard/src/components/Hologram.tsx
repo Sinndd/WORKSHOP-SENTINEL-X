@@ -2,7 +2,7 @@
 //   nominal  : cyan, regard qui balaie lentement
 //   warning  : ambre, tête qui scrute vite (présence détectée)
 //   critical : rouge, tête agitée, projection instable
-//   offline  : bleu acier éteint, tête baissée, projection qui décroche
+//   offline  : bleu acier clair, tête baissée, projection légèrement instable
 // Modèle : public/models/wall-e.glb (généré par scripts/convert-model.mjs) avec les nœuds body / neck > head, eyes.
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -16,7 +16,7 @@ const COLORS: Record<HoloMode, string> = {
   nominal: "#38e1ff",
   warning: "#ffb000",
   critical: "#ff3b3b",
-  offline: "#3a5468",
+  offline: "#7091bb",
 };
 const MODEL_URL = `${import.meta.env.BASE_URL}models/wall-e.glb`;
 const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -112,11 +112,13 @@ function WallE({ model, mode, presence }: { model: THREE.Group; mode: HoloMode; 
     for (const m of mats) {
       m.uniforms.uTime.value = t;
       (m.uniforms.uColor.value as THREE.Color).lerp(target, Math.min(1, dt * 3));
-      m.uniforms.uFlicker.value = REDUCED_MOTION ? 0 : mode === "offline" ? 1 : mode === "critical" ? 0.8 : 0.25;
-      m.uniforms.uGlitch.value = REDUCED_MOTION ? 0 : mode === "critical" ? 1 : mode === "offline" ? 0.6 : 0.08;
+      m.uniforms.uFlicker.value = REDUCED_MOTION ? 0 : mode === "offline" ? 0.45 : mode === "critical" ? 0.8 : 0.25;
+      m.uniforms.uGlitch.value = REDUCED_MOTION ? 0 : mode === "critical" ? 1 : mode === "offline" ? 0.25 : 0.08;
+      // Hors ligne : projection un peu plus transparente (veille), sans disparaître.
+      m.uniforms.uOpacity.value = THREE.MathUtils.lerp(m.uniforms.uOpacity.value, (m === mats[1] ? 2.2 : 1) * (mode === "offline" ? 0.8 : 1), Math.min(1, dt * 3));
     }
     lines.color.lerp(target, Math.min(1, dt * 3));
-    lines.opacity = mode === "offline" ? 0.1 : 0.22;
+    lines.opacity = mode === "offline" ? 0.18 : 0.22;
     if (REDUCED_MOTION) return;
     if (group.current) group.current.position.y = Math.sin(t * 1.2) * 0.5;      // flottement
     if (neck) {
@@ -166,7 +168,7 @@ function Projector({ mode }: { mode: HoloMode }) {
     ringMat.color.lerp(color, Math.min(1, dt * 3));
     (coneMat.uniforms.uColor.value as THREE.Color).lerp(color, Math.min(1, dt * 3));
     pointMat.color.lerp(color, Math.min(1, dt * 3));
-    pointMat.opacity = mode === "offline" ? 0.15 : 0.7;
+    pointMat.opacity = mode === "offline" ? 0.35 : 0.7;
     if (REDUCED_MOTION) return;
     if (rings.current) rings.current.rotation.z = clock.elapsedTime * 0.3;
     const attr = points.current?.geometry.getAttribute("position") as THREE.BufferAttribute | undefined;

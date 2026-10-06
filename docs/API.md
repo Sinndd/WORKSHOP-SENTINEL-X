@@ -361,7 +361,7 @@ gardent leurs couleurs réservées avec icône et libellé.
 | Barre d'état | sections (touches **1** à **4**), horloges locale et UTC, recherche de commandes **Ctrl-K / ⌘K**, compte connecté |
 | Relevés | température, humidité, gaz, présence : valeur actuelle et plage de la période (Wi-Fi et mémoire de l'ESP dans l'info-bulle de l'état du module) |
 | Commandes | sas, alarme, **arrêt d'urgence en deux clics** (armer puis confirmer sous 5 s) |
-| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **cyan** nominal, **ambre** présence ou avertissement, **rouge** alerte critique / gaz / surchauffe, **éteint** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer (aide affichée au survol) |
+| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **cyan** nominal, **ambre** présence ou avertissement, **rouge** alerte critique / gaz / surchauffe, **bleu acier** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer (aide affichée au survol) |
 | Flux d'événements | alertes, passages RFID et commandes, fusionnés par ordre chronologique |
 | Caméra IA | dernière image de la webcam (YOLO) |
 | Courbes | température, humidité, pic de gaz, présence. Curseur synchronisé sur les 4 courbes, flèches ← → au clavier |
