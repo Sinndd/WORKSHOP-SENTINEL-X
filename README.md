@@ -14,7 +14,7 @@ Documentation :
 - **[docs/CONTRAT-MQTT.md](docs/CONTRAT-MQTT.md)** : contrat MQTT v2 (source de vérité ESP32 ↔ serveur) ;
 - **[docs/SECURITE.md](docs/SECURITE.md)** : comptes personnels, rôles, 2FA, verrouillage, blocage d'IP et détection d'intrusion ;
 - **[docs/API.md](docs/API.md)** : référence de l'API REST ([docs/openapi.json](docs/openapi.json), interface interactive sur `:8000/docs`) ;
-- **tableau de bord d'analyse** (React) : `http://192.168.10.1:8000/dashboard/` (jeton `API_TOKEN`).
+- **tableau de bord** (React, style terminal, hologramme 3D de Wall-E) : `http://192.168.10.1:8000/dashboard/`. Avant le premier build : `cd dashboard && npm install && npm run model` (modèle 3D non versionné, cf. docs/API.md § 9).
 
 ---
 

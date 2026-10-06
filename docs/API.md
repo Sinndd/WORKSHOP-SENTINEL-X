@@ -349,23 +349,41 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 ## 9. Tableau de bord
 
 `http://192.168.10.1:8000/dashboard/` : page React servie par l'API elle-même, sans conteneur ni ressource externe. Elle
-fonctionne donc sur le Wi-Fi de la table, même sans Internet. Au premier accès, la page demande le jeton `API_TOKEN`,
-conservé uniquement pour l'onglet (`sessionStorage`).
+fonctionne donc sur le Wi-Fi de la table, même sans Internet. Connexion par compte (identifiant + mot de passe, double
+authentification facultative) ; la session est conservée uniquement pour l'onglet (`sessionStorage`).
+
+**Identité « terminal »** vert/noir façon salle de contrôle (inspirée de WorldMonitor) : police JetBrains Mono embarquée,
+panneaux en fenêtres de terminal, léger effet CRT. Les courbes utilisent un vert validé pour le fond sombre, les statuts
+gardent leurs couleurs réservées avec icône et libellé.
 
 | Zone | Contenu |
 |---|---|
-| En-tête | état du module (en ligne si un message a été reçu il y a moins de 15 s), heure de mise à jour |
-| Filtres | période (15 min, 1 h, 6 h, 24 h, 7 jours), actualisation automatique toutes les 10 s, export CSV brut |
-| Indicateurs | valeur actuelle + min/moy/max de la période : température, humidité, gaz, présence, alertes non acquittées, Wi-Fi |
-| Actionneurs | sas, vanne gaz, barrière, ventilation, alarme (dernier état transmis) |
-| Courbes | température, humidité, pic de gaz, présence (% du temps). Curseur synchronisé sur les 4 courbes, flèches ← → au clavier ; une coupure dans la courbe signale un module hors ligne |
-| Données | tableau des intervalles agrégés (les mêmes valeurs que les courbes) |
-| Alertes | répartition par type, liste filtrable, bouton **Acquitter** |
-| Accès RFID | passages accordés et refusés |
-| Commandes | historique des ordres envoyés à l'ESP32 |
+| Barre d'état | sections (touches **1** à **4**), horloges locale et UTC, palette de commandes **Ctrl-K / ⌘K**, compte connecté |
+| Bandeau défilant | état du module, dernières mesures et derniers événements (pause au survol) |
+| Relevés | valeur actuelle + min/moy/max de la période : température, humidité, gaz, présence, alertes non acquittées, Wi-Fi |
+| Commandes | sas, alarme, **arrêt d'urgence en deux clics** (armer puis confirmer sous 5 s), état des actionneurs |
+| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **vert** nominal, **ambre** présence ou avertissement, **rouge** alerte critique / gaz / surchauffe, **éteint** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer |
+| Flux d'événements | alertes, passages RFID et commandes, fusionnés par ordre chronologique |
+| Caméra IA | dernière image de la webcam (YOLO) |
+| Courbes | température, humidité, pic de gaz, présence. Curseur synchronisé sur les 4 courbes, flèches ← → au clavier |
+| Journal | alertes (filtrables, bouton **Acquitter**), accès RFID, commandes envoyées |
 
-Thème clair ou sombre selon le système, mise en page adaptée au téléphone. Code dans [`dashboard/`](../dashboard)
-(Vite + React + TypeScript, graphiques SVG sans bibliothèque). L'image Docker de l'API le compile au build.
+Les comptes **lecteurs** voient tout mais ne peuvent ni commander ni acquitter. Les actions physiques (sas, alarme, arrêt
+d'urgence) ne sont **pas** proposées dans la palette Ctrl-K, uniquement sur leurs boutons.
+
+**Modèle 3D.** Le fichier source (`Wall-E+mark+2(2).fbx`, à la racine) et le modèle web (`dashboard/public/models/wall-e.glb`)
+ne sont **pas versionnés** (personnage © Disney/Pixar). Pour (re)générer le modèle avant de construire l'image :
+
+```bash
+cd dashboard && npm install && npm run model        # FBX -> GLB (375 Ko), découpé en corps / tête / yeux
+```
+
+Sans ce fichier, le tableau de bord fonctionne normalement et l'hologramme affiche « MODÈLE ABSENT ». Le module 3D
+(Three.js, ~260 Ko compressés) n'est chargé qu'à l'ouverture de la supervision. Le rendu se fait dans le navigateur de
+l'utilisateur : aucune charge pour le Raspberry Pi. Si l'utilisateur demande la réduction des animations (réglage
+système), l'hologramme, le bandeau et les clignotements sont figés.
+
+Code dans [`dashboard/`](../dashboard) (Vite + React + TypeScript). L'image Docker de l'API le compile au build.
 
 ## 10. Développement
 
@@ -388,7 +406,8 @@ Organisation du code :
 | `app/mqtt_bridge.py` | décision d'accès RFID, publication des commandes |
 | `app/security.py` | jetons Bearer (comparaison en temps constant) |
 | `app/db.py` | pool psycopg (4 connexions max, rôle `sentinel_app`) |
-| `../dashboard/src/` | tableau de bord : `App.tsx` (pages, filtres), `components/LineChart.tsx` (courbes SVG), `api.ts` |
+| `../dashboard/src/` | tableau de bord : `App.tsx` (coque, connexion, raccourcis), `Supervision.tsx` (salle de contrôle), `components/Hologram.tsx` (Wall-E 3D), `components/LineChart.tsx` (courbes SVG), `components/CommandPalette.tsx` |
+| `../dashboard/scripts/convert-model.mjs` | conversion FBX -> GLB du modèle de Wall-E (`npm run model`) |
 
 Contraintes du conteneur à respecter lors d'une évolution : utilisateur non-root, système de fichiers en lecture
 seule (`/tmp` seul inscriptible), port 8000, route `/health` conservée, `mem_limit: 128m`. La consommation mesurée
