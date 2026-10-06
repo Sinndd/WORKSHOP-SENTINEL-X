@@ -258,9 +258,16 @@ td.num, th.num { text-align: right; }
 .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--critical); display: inline-block; color: var(--critical); animation: pulse 1.6s infinite; }
 
 /* ------------------------------------------------------------------ supervision */
-.control-room { display: grid; gap: 14px; grid-template-columns: minmax(260px, 1fr) minmax(0, 2.1fr) minmax(290px, 1.15fr); align-items: start; margin-bottom: 14px; }
-@media (max-width: 1200px) { .control-room { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .control-room .holo-col { grid-column: 1 / -1; order: -1; } }
+/* Haut : courbes (2 + 2) de part et d'autre de l'hologramme, qui prend la hauteur des colonnes */
+.control-room { display: grid; gap: 14px; grid-template-columns: minmax(260px, 1fr) minmax(0, 1.9fr) minmax(260px, 1fr); align-items: stretch; margin-bottom: 14px; }
+.control-room .charts-col { align-content: start; }
+.holo-col > .card { height: 100%; display: flex; flex-direction: column; }
+.holo-col .holo { flex: 1; height: auto; min-height: 380px; }
+@media (max-width: 1200px) { .control-room { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .control-room .holo-col { grid-column: 1 / -1; order: -1; } .holo-col .holo { min-height: 420px; } }
 @media (max-width: 720px) { .control-room { grid-template-columns: minmax(0, 1fr); } }
+/* Bas : relevés, commandes, flux d'événements */
+.bottom-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); align-items: start; margin-bottom: 14px; }
+.bottom-row .feed { max-height: 260px; }
 .stack { display: grid; gap: 14px; min-width: 0; }
 .readouts { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .readouts .tile { padding: 12px 14px; }
@@ -386,23 +393,19 @@ td.num, th.num { text-align: right; }
   .pulse, .live i, .node-pill.on i { animation: none; }
 }
 
-/* ------------------------------------------------------------------ écran large : tout tient sans défiler
-   (relevés, commandes, hologramme, flux, caméra ET les 4 courbes ; le journal reste en dessous) */
-@media (min-width: 1201px) and (min-height: 700px) {
-  .page { padding-top: 12px; }
-  .filters { margin-bottom: 12px; }
-  .control-room, .charts-row { gap: 12px; margin-bottom: 12px; }
-  .stack { gap: 12px; }
-  /* l'hologramme absorbe la hauteur disponible : 100vh - barre (≈61) - filtres (≈52) - courbes (≈196) - en-tête et marges (≈85) */
-  .holo { height: clamp(260px, calc(100vh - 394px), 640px); }
-  .readouts { gap: 8px; }
-  .readouts .tile { padding: 8px 12px; }
-  .readouts .tile .value { font-size: 22px; margin-top: 2px; }
-  .ctl-row { padding: 7px 0; }
-  .btn-emergency { margin-top: 10px; padding: 10px; }
-  .feed { max-height: 150px; }
-  .camera-feed-box { aspect-ratio: 16 / 9; }
-  .card-head { padding-top: 10px; }
-  .card > .card-head + * { margin-top: 10px; }
-  .card > :last-child { margin-bottom: 12px; }
-}
+
+/* Caméra incrustée dans l'hologramme (coin supérieur droit) */
+.cam-pip { position: absolute; top: 14px; right: 14px; z-index: 2; width: clamp(150px, 30%, 300px); aspect-ratio: 16 / 9;
+  border-radius: 10px; overflow: hidden; display: grid; place-items: center; color: var(--text-muted);
+  background: rgba(4, 8, 16, 0.82); border: 1px solid var(--line-strong); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.cam-pip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.cam-pip.is-live { border-color: rgba(208, 59, 59, 0.55); }
+.cam-badge { position: absolute; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+.cam-badge i { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+.cam-badge.live { color: #fff; background: rgba(208, 59, 59, 0.92); }
+.cam-badge.live i { background: #fff; color: #fff; animation: pulse 1.6s infinite; }
+.cam-badge.offline { color: var(--text-secondary); background: rgba(10, 16, 28, 0.9); border: 1px solid var(--line-strong); }
+.cam-badge.offline i { background: var(--text-muted); }
+@media (max-width: 720px) { .cam-pip { width: 42%; } }
+@media (prefers-reduced-motion: reduce) { .cam-badge.live i { animation: none; } }

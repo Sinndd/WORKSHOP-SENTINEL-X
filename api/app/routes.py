@@ -309,7 +309,10 @@ def get_latest_snapshot():
             <text x="320" y="310" font-family="sans-serif" font-size="12" fill="#52514e" text-anchor="middle">CENTRE DE COMMANDEMENT SENTINEL-X</text>
         </svg>"""
         return RawResponse(content=svg, media_type="image/svg+xml")
-    return RawResponse(content=_latest_snapshot, media_type="image/jpeg")
+    # Horodatage de la capture : le tableau de bord n'affiche « Live » que si l'image est récente.
+    return RawResponse(content=_latest_snapshot, media_type="image/jpeg",
+                       headers={"X-Snapshot-Ts": _latest_snapshot_ts.isoformat() if _latest_snapshot_ts else "",
+                                "Cache-Control": "no-store"})
 
 
 @router.get("/vision/events", response_model=list[VisionEventOut], tags=["vision IA"], dependencies=viewer)

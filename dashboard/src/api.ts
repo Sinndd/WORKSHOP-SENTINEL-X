@@ -75,3 +75,12 @@ export async function download(path: string, token: string, filename: string): P
 export async function fetchBlobUrl(path: string, token: string): Promise<string> {
   return URL.createObjectURL(await (await request(path, token)).blob());
 }
+
+/** Dernière image de la caméra IA : JPEG récent = flux actif ; image d'attente (SVG) ou image ancienne = caméra éteinte. */
+export async function fetchSnapshot(path: string, token: string, maxAgeMs: number): Promise<{ url: string | null; live: boolean }> {
+  const res = await request(path, token);
+  const ts = Date.parse(res.headers.get("x-snapshot-ts") ?? "");
+  const live = (res.headers.get("content-type") ?? "").includes("jpeg") && Number.isFinite(ts) && Date.now() - ts < maxAgeMs;
+  if (!live) return { url: null, live: false };
+  return { url: URL.createObjectURL(await res.blob()), live: true };
+}
