@@ -35,13 +35,6 @@ const SEVERITY: Record<Severity, { status: Status; label: string }> = {
   WARNING: { status: "warning", label: "Avertissement" },
   INFO: { status: "neutral", label: "Info" },
 };
-const ACTUATORS: { key: keyof Telemetry; label: string; on: string; off: string }[] = [
-  { key: "airlock_open", label: "Sas", on: "ouvert", off: "fermé" },
-  { key: "gas_valve_open", label: "Vanne gaz", on: "ouverte", off: "fermée" },
-  { key: "barrier_open", label: "Barrière", on: "ouverte", off: "fermée" },
-  { key: "ventilation_active", label: "Ventilation", on: "active", off: "arrêt" },
-  { key: "alarm_active", label: "Alarme", on: "active", off: "veille" },
-];
 const MODE_LABEL: Record<HoloMode, string> = { nominal: "Nominal", warning: "Vigilance", critical: "Alerte", offline: "Hors ligne" };
 
 interface Data {
@@ -164,7 +157,6 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
 
   return (
     <>
-      <Ticker data={data} online={online} />
       <main className="page">
         {actionSuccess && <div className="alert-banner success-banner" role="status">{actionSuccess}</div>}
         {error && <div className="alert-banner error-banner" role="alert">{error}</div>}
@@ -180,14 +172,13 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             Temps réel (5 s)
           </label>
-          <button className="btn btn-sm" onClick={load} disabled={loading}>Actualiser</button>
-          <button className="btn btn-sm" onClick={exportCsv}>Export CSV</button>
-          <span className="meta muted">{data ? `Mis à jour à ${new Date(now).toLocaleTimeString("fr-FR")}` : "Chargement…"}</span>
+          <span className="spacer" />
+          <button className="btn btn-sm btn-ghost" onClick={exportCsv}>Exporter CSV</button>
         </div>
 
         {data && (
           <Dashboard
-            data={data} online={online} now={now} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
+            data={data} online={online} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
             unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token}
             onAck={acknowledge} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
             camRefreshKey={camRefreshKey}
@@ -218,33 +209,6 @@ function feedItems(data: Data): FeedItem[] {
   return items.sort((x, y) => Date.parse(y.ts) - Date.parse(x.ts));
 }
 
-/** Bandeau défilant des derniers événements (pause au survol ; figé si « réduire les animations »). */
-function Ticker({ data, online }: { data: Data | null; online: boolean }) {
-  const items = data ? feedItems(data).slice(0, 14) : [];
-  const hot = data?.alerts.some((a) => !a.acknowledged && a.severity === "CRITICAL") ?? false;
-  const latest = data?.latest;
-  const status = [
-    `Nœud ${NODE} ${online ? "en ligne" : "hors ligne"}`,
-    latest ? `Température ${num(latest.temperature_celsius)} °C · Humidité ${num(latest.humidity_percent, 0)} % · Gaz ${num(latest.gas_raw_ppm, 0)}` : "Aucune télémétrie",
-  ];
-  return (
-    <div className="ticker" role="marquee" aria-label="Derniers événements">
-      <span className={`tag${hot ? " hot" : ""}`}>{hot ? "● ALERTE" : "● EN DIRECT"}</span>
-      <div className="viewport">
-        <div className="track" style={{ ["--ticker-duration" as string]: `${Math.max(30, (items.length + 2) * 7)}s` }}>
-          {status.map((s) => <span className="item" key={s}><b>{s}</b></span>)}
-          {items.map((i) => (
-            <span className="item" key={i.key}>
-              [{new Date(i.ts).toLocaleTimeString("fr-FR")}] <b>{i.src.charAt(0).toUpperCase() + i.src.slice(1)}</b> {i.msg}
-            </span>
-          ))}
-          {!items.length && <span className="item">Aucun événement sur la période</span>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Image protégée : le jeton ne peut pas passer par un simple <img src>, on la charge en blob. */
 function CameraFeed({ token, refreshKey }: { token: string; refreshKey: number }) {
   const [src, setSrc] = useState<string | null>(null);
@@ -262,9 +226,12 @@ function CameraFeed({ token, refreshKey }: { token: string; refreshKey: number }
 function NodeStatus({ device, now }: { device: Device | null; now: number }) {
   if (!device) return <span className="node-pill off"><i aria-hidden />Aucun module</span>;
   const online = device.last_seen != null && now - Date.parse(device.last_seen) < ONLINE_WITHIN_MS;
+  const details = [`Dernier signal ${ago(device.last_seen, now)}`,
+    device.last_wifi_rssi_dbm != null ? `Wi-Fi ${device.last_wifi_rssi_dbm} dBm` : null,
+    device.last_free_heap_bytes != null ? `RAM libre ${Math.round(device.last_free_heap_bytes / 1024)} Ko` : null].filter(Boolean).join(" · ");
   return (
-    <span className={`node-pill ${online ? "on" : "off"}`} title={online ? "Données reçues" : `Dernier signal ${ago(device.last_seen, now)}`}>
-      <i aria-hidden />{device.node_id} · {online ? "En ligne" : `Hors ligne (dernier signal ${ago(device.last_seen, now)})`}
+    <span className={`node-pill ${online ? "on" : "off"}`} title={details}>
+      <i aria-hidden />{device.node_id} · {online ? "En ligne" : `Hors ligne depuis ${ago(device.last_seen, now).replace("il y a ", "")}`}
     </span>
   );
 }
@@ -289,7 +256,6 @@ function EmergencyButton({ onConfirm, disabled }: { onConfirm: () => void; disab
 interface DashboardProps {
   data: Data;
   online: boolean;
-  now: number;
   loading: boolean;
   hoverT: number | null;
   setHoverT: (t: number | null) => void;
@@ -307,10 +273,10 @@ interface DashboardProps {
 }
 
 function Dashboard({
-  data, online, now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
+  data, online, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
   onAirlock, onAlarm, onEmergencyStop, camRefreshKey, canOperate, token,
 }: DashboardProps) {
-  const { agg, latest, alerts, access, commands, device } = data;
+  const { agg, latest, alerts, access, commands } = data;
   const s = agg.summary;
   const start = Date.parse(agg.since), end = Date.parse(agg.until), bucketMs = agg.bucket_s * 1000;
   const series = useMemo(() => {
@@ -328,13 +294,12 @@ function Dashboard({
   const shownAlerts = (unackOnly ? unack : alerts).slice(0, 100);
   const granted = access.filter((a) => a.access_granted).length;
   const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT };
-  const bucketLabel = agg.bucket_s < 60 ? `${agg.bucket_s} s` : agg.bucket_s < 3600 ? `${Math.round(agg.bucket_s / 60)} min` : `${num(agg.bucket_s / 3600, 1)} h`;
+  const hasRange = s.samples > 0;
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
 
   const gasHigh = (latest?.gas_raw_ppm ?? 0) >= GAS_HIGH;
   const tempHigh = (latest?.temperature_celsius ?? 0) >= TEMP_HIGH;
   const presence = Boolean(online && latest?.presence_detected);
-  const rssi = device?.last_wifi_rssi_dbm ?? null;
   const mode: HoloMode = !online ? "offline"
     : unack.some((a) => a.severity === "CRITICAL") || gasHigh || tempHigh ? "critical"
     : presence || unack.some((a) => a.severity === "WARNING") ? "warning" : "nominal";
@@ -350,21 +315,17 @@ function Dashboard({
       <div className="control-room">
         {/* Colonne gauche : relevés et commandes */}
         <div className="stack">
-          <Card title="Relevés" icon="gauge" actions={<span>min / moy / max sur la période</span>}>
+          <Card title="Relevés" icon="gauge">
             <div className="readouts">
               <StatTile icon="temp" label="Température" value={num(latest?.temperature_celsius)} unit="°C" tone={tempHigh ? "critical" : "neutral"}
-                detail={`${num(s.temperature_min)} / ${num(s.temperature_avg)} / ${num(s.temperature_max)}`} />
+                detail={hasRange ? `${num(s.temperature_min)} – ${num(s.temperature_max)} °C` : undefined} />
               <StatTile icon="drop" label="Humidité" value={num(latest?.humidity_percent, 0)} unit="%"
-                detail={`${num(s.humidity_min, 0)} / ${num(s.humidity_avg, 0)} / ${num(s.humidity_max, 0)}`} />
-              <StatTile icon="gas" label="Gaz MQ-2" value={num(latest?.gas_raw_ppm, 0)} tone={gasHigh ? "critical" : "neutral"}
-                detail={`moy ${num(s.gas_avg, 0)} · pic ${num(s.gas_max, 0)}`} />
+                detail={hasRange ? `${num(s.humidity_min, 0)} – ${num(s.humidity_max, 0)} %` : undefined} />
+              <StatTile icon="gas" label="Gaz" value={num(latest?.gas_raw_ppm, 0)} tone={gasHigh ? "critical" : "neutral"}
+                detail={hasRange ? `pic ${num(s.gas_max, 0)}` : undefined} />
               <StatTile icon="user" label="Présence" value={latest?.presence_detected == null ? "—" : latest.presence_detected ? "Oui" : "Non"}
                 tone={presence ? "warning" : "neutral"}
-                detail={`${num(s.presence_ratio == null ? null : s.presence_ratio * 100, 0)} % du temps`} />
-              <StatTile icon="bell" label="Alertes" value={String(unack.length)} tone={unack.length ? "critical" : "good"}
-                detail={`${alerts.length} sur la période`} />
-              <StatTile icon="wifi" label="Wi-Fi" value={num(rssi, 0)} unit="dBm" tone={rssi != null && rssi < -80 ? "serious" : "neutral"}
-                detail={`RAM ${num(device?.last_free_heap_bytes == null ? null : device.last_free_heap_bytes / 1024, 0)} Ko`} />
+                detail={hasRange ? `${num((s.presence_ratio ?? 0) * 100, 0)} % du temps` : undefined} />
             </div>
           </Card>
 
@@ -388,12 +349,6 @@ function Dashboard({
               </div>
               <EmergencyButton onConfirm={onEmergencyStop} disabled={!canOperate} />
             </fieldset>
-            <div className="chips">
-              {ACTUATORS.map((a) => {
-                const v = latest?.[a.key] as boolean | null | undefined;
-                return <span className={`chip ${v ? "on" : ""}`} key={a.key} title={a.label}>{a.label} : {v == null ? "—" : v ? a.on : a.off}</span>;
-              })}
-            </div>
           </Card>
         </div>
 
@@ -406,24 +361,6 @@ function Dashboard({
               <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
                 <Hologram mode={mode} presence={presence} />
               </Suspense>
-              <div className="hud tl" aria-hidden>
-                <div>Nœud <b>{NODE}</b></div>
-                <div>Liaison <b>{online ? "établie" : "perdue"}</b></div>
-                <div>Dernier signal <b>{ago(device?.last_seen ?? null, now)}</b></div>
-              </div>
-              <div className="hud tr" aria-hidden>
-                <span className={`holo-status ${mode === "nominal" ? "" : mode}`}>{MODE_LABEL[mode]}</span>
-                <div>Présence <b>{presence ? "détectée" : "aucune"}</b></div>
-              </div>
-              <div className="hud bl" aria-hidden>
-                <div>Température <b>{num(latest?.temperature_celsius)} °C</b></div>
-                <div>Humidité <b>{num(latest?.humidity_percent, 0)} %</b></div>
-                <div>Gaz <b>{num(latest?.gas_raw_ppm, 0)}</b></div>
-              </div>
-              <div className="hud br" aria-hidden>
-                <div>Alertes actives <b>{unack.length}</b></div>
-                <div>Accès accordés <b>{granted}/{access.length}</b></div>
-              </div>
               <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
             </div>
           </Card>
@@ -431,7 +368,7 @@ function Dashboard({
 
         {/* Colonne droite : flux d'événements et caméra */}
         <div className="stack">
-          <Card title="Flux d'événements" icon="pulse" actions={<span className="live"><i aria-hidden />EN DIRECT</span>}>
+          <Card title="Flux d'événements" icon="pulse">
             <ul className="feed" aria-label="Derniers événements">
               {feed.map((f) => (
                 <li key={f.key} className={`lvl-${f.level}`}>
@@ -442,7 +379,7 @@ function Dashboard({
               {!feed.length && <li className="empty">Aucun événement sur la période</li>}
             </ul>
           </Card>
-          <Card title="Caméra IA" icon="cam" actions={<span className="live"><i aria-hidden />DIRECT</span>}>
+          <Card title="Caméra IA" icon="cam">
             <div className="camera-feed-box">
               <CameraFeed token={token} refreshKey={camRefreshKey} />
               <span className="cam-node">Serveur local · YOLO</span>
@@ -452,16 +389,16 @@ function Dashboard({
       </div>
 
       <div className="charts-row">
-        <Card title="Température" icon="temp" actions={<span>°C · pas {bucketLabel}</span>}>
+        <Card title="Température" icon="temp" actions={<span>°C</span>}>
           <LineChart title="Température" unit="°C" points={series.temp} {...chartProps} />
         </Card>
-        <Card title="Humidité" icon="drop" actions={<span>% · pas {bucketLabel}</span>}>
+        <Card title="Humidité" icon="drop" actions={<span>%</span>}>
           <LineChart title="Humidité" unit="%" digits={0} domain={[0, 100]} points={series.hum} {...chartProps} />
         </Card>
-        <Card title="Gaz (pic)" icon="gas" actions={<span>ADC 0–4095 · pas {bucketLabel}</span>}>
+        <Card title="Gaz (pic)" icon="gas" actions={<span>valeur brute</span>}>
           <LineChart title="Gaz (pic)" unit="" digits={0} points={series.gas} {...chartProps} />
         </Card>
-        <Card title="Présence" icon="user" actions={<span>% du temps · pas {bucketLabel}</span>}>
+        <Card title="Présence" icon="user" actions={<span>% du temps</span>}>
           <LineChart title="Présence" unit="%" digits={0} domain={[0, 100]} points={series.presence} {...chartProps} />
         </Card>
       </div>

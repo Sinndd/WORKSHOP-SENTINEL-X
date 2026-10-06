@@ -153,7 +153,8 @@ export default function App() {
             <span className="avatar" aria-hidden>{initials(me.full_name || me.username)}</span>
             <span className="user-meta">
               <span className="user-name">{me.full_name || me.username}</span>
-              <span className="role-tag">{me.service ? "Compte de service" : ROLE_LABELS[me.role]}</span>
+              {(me.full_name || me.username) !== ROLE_LABELS[me.role] &&
+                <span className="role-tag">{me.service ? "Compte de service" : ROLE_LABELS[me.role]}</span>}
             </span>
           </div>
           <button className="btn btn-sm btn-ghost" onClick={logout}>Déconnexion</button>
@@ -178,7 +179,7 @@ function Clock() {
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
   const local = now.toLocaleTimeString("fr-FR");
   const utc = now.toISOString().slice(11, 19);
-  return <span className="clock" role="timer" aria-label={`Heure locale ${local}, UTC ${utc}`}><b>{local}</b> · {utc} UTC</span>;
+  return <span className="clock" role="timer" title={`${utc} UTC`} aria-label={`Heure locale ${local}`}><b>{local}</b></span>;
 }
 
 function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Session) => void }) {
