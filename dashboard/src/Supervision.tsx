@@ -316,7 +316,7 @@ function Dashboard({
   const byType = Object.keys(EVENT_LABELS).map((k) => ({ label: EVENT_LABELS[k], value: alerts.filter((a) => a.event_type === k).length }));
   const shownAlerts = (unackOnly ? unack : alerts).slice(0, 100);
   const granted = access.filter((a) => a.access_granted).length;
-  const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT };
+  const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT, height: 128 };
   const hasRange = s.samples > 0;
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
 

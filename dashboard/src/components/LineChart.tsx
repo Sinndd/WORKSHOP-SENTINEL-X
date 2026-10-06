@@ -15,11 +15,12 @@ interface Props {
   bucketMs: number;
   digits?: number;
   domain?: [number, number];        // échelle fixe (ex. 0-100 %)
+  height?: number;                  // hauteur totale en px (axes compris)
   hoverT: number | null;            // curseur partagé entre les graphiques
   onHover: (t: number | null) => void;
 }
 
-const HEIGHT = 150;
+const DEFAULT_HEIGHT = 150;
 const M = { top: 8, right: 10, bottom: 22, left: 38 };
 
 /** Graduations « rondes » (1, 2, 5 x 10^n). */
@@ -47,7 +48,7 @@ function useWidth<T extends HTMLElement>() {
   return [ref, width] as const;
 }
 
-export function LineChart({ title, unit, points, start, end, bucketMs, digits = 1, domain, hoverT, onHover }: Props) {
+export function LineChart({ title, unit, points, start, end, bucketMs, digits = 1, domain, height = DEFAULT_HEIGHT, hoverT, onHover }: Props) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const values = points.map((p) => p.v).filter((v): v is number => v != null);
   const span = Math.max(1, end - start);
@@ -55,7 +56,7 @@ export function LineChart({ title, unit, points, start, end, bucketMs, digits = 
     ? niceTicks(domain[0], domain[1])
     : values.length ? niceTicks(Math.min(...values), Math.max(...values)) : [0, 1];
   const yMin = ticksY[0], yMax = ticksY[ticksY.length - 1];
-  const w = width - M.left - M.right, h = HEIGHT - M.top - M.bottom;
+  const w = width - M.left - M.right, h = height - M.top - M.bottom;
   const x = (t: number) => M.left + ((t + bucketMs / 2 - start) / span) * w;   // milieu de l'intervalle
   const y = (v: number) => M.top + h - ((v - yMin) / (yMax - yMin || 1)) * h;
 
@@ -97,7 +98,7 @@ export function LineChart({ title, unit, points, start, end, bucketMs, digits = 
   const last = values.length ? values[values.length - 1] : null;
   return (
     <div className="chart" ref={ref}>
-      <svg height={HEIGHT} role="img"
+      <svg height={height} role="img"
         aria-label={`${title} : ${points.length} intervalles, dernière valeur ${num(last, digits)} ${unit}`}>
         {ticksY.map((v) => (
           <g key={v}>
@@ -106,7 +107,7 @@ export function LineChart({ title, unit, points, start, end, bucketMs, digits = 
           </g>
         ))}
         {ticksX.map((t, i) => (
-          <text key={t} className="tick" x={M.left + ((t - start) / span) * w} y={HEIGHT - 6}
+          <text key={t} className="tick" x={M.left + ((t - start) / span) * w} y={height - 6}
             textAnchor={i === 0 ? "start" : i === ticksX.length - 1 ? "end" : "middle"}>{tick(t, span)}</text>
         ))}
         {segments.map((d, i) => <path key={i} className="line" d={d} />)}

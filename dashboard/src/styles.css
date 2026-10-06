@@ -385,3 +385,24 @@ td.num, th.num { text-align: right; }
   .ticker .track { animation: none; padding-left: 14px; }
   .pulse, .live i, .node-pill.on i { animation: none; }
 }
+
+/* ------------------------------------------------------------------ écran large : tout tient sans défiler
+   (relevés, commandes, hologramme, flux, caméra ET les 4 courbes ; le journal reste en dessous) */
+@media (min-width: 1201px) and (min-height: 700px) {
+  .page { padding-top: 12px; }
+  .filters { margin-bottom: 12px; }
+  .control-room, .charts-row { gap: 12px; margin-bottom: 12px; }
+  .stack { gap: 12px; }
+  /* l'hologramme absorbe la hauteur disponible : 100vh - barre (≈61) - filtres (≈52) - courbes (≈196) - en-tête et marges (≈85) */
+  .holo { height: clamp(260px, calc(100vh - 394px), 640px); }
+  .readouts { gap: 8px; }
+  .readouts .tile { padding: 8px 12px; }
+  .readouts .tile .value { font-size: 22px; margin-top: 2px; }
+  .ctl-row { padding: 7px 0; }
+  .btn-emergency { margin-top: 10px; padding: 10px; }
+  .feed { max-height: 150px; }
+  .camera-feed-box { aspect-ratio: 16 / 9; }
+  .card-head { padding-top: 10px; }
+  .card > .card-head + * { margin-top: 10px; }
+  .card > :last-child { margin-bottom: 12px; }
+}
