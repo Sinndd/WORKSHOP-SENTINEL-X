@@ -34,3 +34,8 @@ dashboard/public/models/*.glb
 # --- Paquet hors ligne (scripts/bundle-offline.sh) ---
 sentinel-offline-*.tar.gz
 sentinel-offline-*.tar.gz.sha256
+
+# Local AI/YOLO files
+.venv-yolo/
+data/
+yolov8n.pt
