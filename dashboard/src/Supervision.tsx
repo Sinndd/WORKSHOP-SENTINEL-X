@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { download, fetchBlobUrl, getJson, postJson, Unauthorized } from "./api";
 import type { PaletteCommand } from "./components/CommandPalette";
 import type { HoloMode } from "./components/Hologram";
@@ -19,7 +19,8 @@ const RANGES = [
   { id: "7d", label: "7 jours", ms: 7 * 24 * 3600_000 },
 ] as const;
 type RangeId = (typeof RANGES)[number]["id"];
-const REFRESH_MS = 5_000;
+const LIVE_MS = 1_000;          // état du module + dernière mesure (2 requêtes légères)
+const FULL_REFRESH_MS = 10_000; // courbes agrégées, journal, flux (plus coûteux pour le Pi)
 const ONLINE_WITHIN_MS = 15_000;
 const GAS_HIGH = 614;          // seuil local du firmware (A0 >= 150 sur 1023)
 const TEMP_HIGH = 40;
@@ -99,12 +100,34 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
     }
   }, [token, range, onExpired]);
 
+  // Rafraîchissement rapide : seulement le module et la dernière mesure (indicateurs, hologramme, état en ligne).
+  const liveBusy = useRef(false);
+  const loadLive = useCallback(async () => {
+    if (liveBusy.current) return;              // pas de requêtes empilées si le réseau ralentit
+    liveBusy.current = true;
+    try {
+      const [devices, latest] = await Promise.all([
+        getJson<Device[]>("/api/v1/devices", token),
+        getJson<Telemetry>(`/api/v1/telemetry/latest?node_id=${NODE}`, token).catch((e) => { if (e instanceof Unauthorized) throw e; return null; }),
+      ]);
+      setData((prev) => prev && { ...prev, latest, device: devices.find((d) => d.node_id === NODE) ?? devices[0] ?? null });
+      setError(null);
+      setNow(Date.now());
+    } catch (e) {
+      if (e instanceof Unauthorized) onExpired();
+      else setError(`Chargement impossible : ${(e as Error).message}`);
+    } finally {
+      liveBusy.current = false;
+    }
+  }, [token, onExpired]);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (!auto) return;
-    const id = setInterval(load, REFRESH_MS);
-    return () => clearInterval(id);
-  }, [auto, load]);
+    const live = setInterval(loadLive, LIVE_MS);
+    const full = setInterval(load, FULL_REFRESH_MS);
+    return () => { clearInterval(live); clearInterval(full); };
+  }, [auto, load, loadLive]);
 
   const run = async (label: string, call: () => Promise<unknown>, ok: string, ms = 4000) => {
     try {
@@ -170,7 +193,7 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
           </div>
           <label className="check">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Temps réel (5 s)
+            Temps réel (1 s)
           </label>
           <span className="spacer" />
           <button className="btn btn-sm btn-ghost" onClick={exportCsv}>Exporter CSV</button>
