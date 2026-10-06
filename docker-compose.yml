@@ -210,6 +210,8 @@ services:
       - "${NTP_BIND_ADDR:-0.0.0.0}:${NTP_PORT:-123}:123/udp"
     sysctls:
       net.ipv4.ip_unprivileged_port_start: "0"   # chrony (non-root) peut écouter sur 123/udp
+    tmpfs:
+      - /run/chrony:uid=100,gid=101,mode=0750,size=1m   # PID de chronyd (racine en lecture seule)
     networks: [frontend]
     mem_limit: 16m
     cpus: 0.2
