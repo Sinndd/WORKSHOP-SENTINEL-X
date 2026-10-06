@@ -1,5 +1,5 @@
 // Hologramme 3D de Wall-E (React Three Fiber + Three.js), piloté par l'état du module SENTINEL-X.
-//   nominal  : cyan, regard qui balaie lentement
+//   nominal  : vert, regard qui balaie lentement
 //   warning  : ambre, tête qui scrute vite (présence détectée)
 //   critical : rouge, tête agitée, projection instable
 //   offline  : bleu acier clair, tête baissée, projection légèrement instable
@@ -13,7 +13,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 export type HoloMode = "nominal" | "warning" | "critical" | "offline";
 
 const COLORS: Record<HoloMode, string> = {
-  nominal: "#38e1ff",
+  nominal: "#35f08a",
   warning: "#ffb000",
   critical: "#ff3b3b",
   offline: "#7091bb",
