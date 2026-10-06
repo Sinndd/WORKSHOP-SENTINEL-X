@@ -25,6 +25,9 @@ const FULL_REFRESH_MS = 10_000; // courbes agrégées, journal, flux (plus coût
 const ONLINE_WITHIN_MS = 15_000;
 const GAS_HIGH = 614;          // seuil local du firmware (A0 >= 150 sur 1023)
 const TEMP_HIGH = 40;
+// Une alerte colore l'hologramme pendant 30 s après sa réception, puis il revient à l'état réel des capteurs.
+// Les alertes non acquittées restent signalées dans le journal.
+const RECENT_ALERT_MS = 30_000;
 
 const EVENT_LABELS: Record<string, string> = {
   INTRUSION_DETECTED: "Intrusion",
@@ -200,7 +203,7 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
 
         {data && (
           <Dashboard
-            data={data} online={online} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
+            data={data} online={online} now={now} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
             unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token}
             onAck={acknowledge} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
           />
@@ -300,6 +303,7 @@ function EmergencyButton({ onConfirm, disabled }: { onConfirm: () => void; disab
 interface DashboardProps {
   data: Data;
   online: boolean;
+  now: number;
   loading: boolean;
   hoverT: number | null;
   setHoverT: (t: number | null) => void;
@@ -316,7 +320,7 @@ interface DashboardProps {
 }
 
 function Dashboard({
-  data, online, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
+  data, online, now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
   onAirlock, onAlarm, onEmergencyStop, canOperate, token,
 }: DashboardProps) {
   const { agg, latest, alerts, access, commands } = data;
@@ -344,9 +348,12 @@ function Dashboard({
   const gasHigh = (latest?.gas_raw_ppm ?? 0) >= GAS_HIGH;
   const tempHigh = (latest?.temperature_celsius ?? 0) >= TEMP_HIGH;
   const presence = Boolean(online && latest?.presence_detected);
+  // État actuel du module : mesures en direct + alertes très récentes (pas l'historique non acquitté).
+  const recentAlert = (sev: Severity) => alerts.some((a) => a.severity === sev && !a.acknowledged
+    && now - Date.parse(a.received_at) < RECENT_ALERT_MS);
   const mode: HoloMode = !online ? "offline"
-    : unack.some((a) => a.severity === "CRITICAL") || gasHigh || tempHigh ? "critical"
-    : presence || unack.some((a) => a.severity === "WARNING") ? "warning" : "nominal";
+    : gasHigh || tempHigh || recentAlert("CRITICAL") ? "critical"
+    : presence || recentAlert("WARNING") ? "warning" : "nominal";
 
   const tabs: { id: JournalTab; label: string; count: number }[] = [
     { id: "alerts", label: "Alertes", count: unack.length },
