@@ -9,7 +9,7 @@
 // =========================================================
 #include "secrets.h"
 
-#define SERVER_HOST       "10.69.127.207"
+#define SERVER_HOST       "10.69.127.115"
 #define HTTP_PORT         8000
 #define MQTT_PORT         8883            // MQTTS chiffré TLS selon CONTRAT-MQTT § 1
 #define MQTT_USER         "esp32"

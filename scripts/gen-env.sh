@@ -75,7 +75,10 @@ trap 'rm -f "$tmp"' EXIT
 # Sous Git Bash, --user est inutile (le montage Windows ignore les UID) et fait échouer l'écriture.
 user_args=(--user "${PUID}:${PGID}")
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) user_args=() ;; esac
-MSYS_NO_PATHCONV=1 docker run --rm --network none "${user_args[@]}" \
+# podman rootless : l'UID de l'hôte doit rester le même dans le conteneur (sinon « Permission denied » sur le montage).
+[[ "$(docker --version 2>&1)" == *podman* ]] && user_args+=(--userns=keep-id)
+# label=disable : Fedora/RHEL (SELinux) refuse sinon l'accès au montage ; sans effet ailleurs.
+MSYS_NO_PATHCONV=1 docker run --rm --network none --security-opt label=disable "${user_args[@]}" \
   --mount "type=bind,source=$SECRETS_DIR,target=/secrets" "$MOSQUITTO_IMAGE" \
   mosquitto_passwd -U /secrets/passwd.tmp
 mv "$tmp" "$SECRETS_DIR/passwd"

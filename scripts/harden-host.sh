@@ -2,10 +2,10 @@
 # Durcissement réseau/SSH de l'hôte SENTINEL-X (Raspberry Pi).
 #
 #   UFW : entrant refusé par défaut ; depuis le Wi-Fi de la table ($LAN_IF, $LAN_NET) :
-#         SSH, MQTTS ($MQTT_PORT), API ($API_PORT), + DHCP/DNS/NTP du point d'accès ;
+#         SSH, MQTTS ($MQTT_PORT), HTTPS ($HTTPS_PORT) + redirection ($HTTP_PORT), NTP ($NTP_PORT/udp) + DHCP/DNS du point d'accès ;
 #         SSH aussi depuis $WAN_IF (eth0), avec limitation anti-bruteforce.
 #   DOCKER-USER : Docker contourne UFW pour les ports publiés -> règles dédiées
-#         (/etc/ufw/after.rules) : seuls 8883/API depuis $LAN_NET sur $LAN_IF passent.
+#         (/etc/ufw/after.rules) : seuls MQTTS/HTTPS/HTTP/NTP depuis $LAN_NET sur $LAN_IF passent.
 #   SSH : authentification par clé uniquement, root interdit.
 #   Rappel : ne pas mettre d'utilisateurs dans le groupe docker (= root) sans nécessité.
 #
@@ -30,7 +30,7 @@ done
 [[ -f .env ]] && { set -a; . ./.env; set +a; }
 LAN_IF="${LAN_IF:-wlan0}"; LAN_NET="${LAN_NET:-192.168.10.0/24}"
 WAN_IF="${WAN_IF:-eth0}";  SSH_FROM_WAN="${SSH_FROM_WAN:-yes}"
-MQTT_PORT="${MQTT_PORT:-8883}"; API_PORT="${API_PORT:-8000}"
+MQTT_PORT="${MQTT_PORT:-8883}"; HTTPS_PORT="${HTTPS_PORT:-443}"; HTTP_PORT="${HTTP_PORT:-80}"; NTP_PORT="${NTP_PORT:-123}"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/01-sentinel-hardening.conf   # "01" : prioritaire (1re valeur lue gagne)
 AFTER_RULES=/etc/ufw/after.rules
 
@@ -69,9 +69,9 @@ done
 cat <<EOF
 [harden] Plan :
   - UFW : deny incoming / allow outgoing
-  - $LAN_IF depuis $LAN_NET : 22/tcp, $MQTT_PORT/tcp, $API_PORT/tcp, 53, 123/udp ; 67/udp (DHCP)
+  - $LAN_IF depuis $LAN_NET : 22/tcp, $MQTT_PORT/tcp, $HTTPS_PORT/tcp, $HTTP_PORT/tcp, $NTP_PORT/udp (NTP), 53 ; 67/udp (DHCP)
   - $WAN_IF : 22/tcp (limité) = $SSH_FROM_WAN
-  - DOCKER-USER : ports publiés joignables uniquement depuis $LAN_IF/$LAN_NET ($MQTT_PORT, $API_PORT)
+  - DOCKER-USER : ports publiés joignables uniquement depuis $LAN_IF/$LAN_NET ($MQTT_PORT, $HTTPS_PORT, $HTTP_PORT, $NTP_PORT/udp)
   - SSH : mots de passe désactivés = $( (( DISABLE_PASSWORDS )) && echo oui || echo NON) ; root interdit
 EOF
 if (( ! DRY && ! YES )); then
@@ -81,16 +81,21 @@ if (( ! DRY && ! YES )); then
 fi
 
 # --- 1. UFW ------------------------------------------------------------------------
-command -v ufw >/dev/null || { run apt-get update -qq; run apt-get install -y -qq ufw; }
+if ! command -v ufw >/dev/null; then
+  timeout 4 bash -c '</dev/tcp/deb.debian.org/80' >/dev/null 2>&1 \
+    || die "ufw n'est pas installé et il n'y a pas d'Internet : installer d'abord le paquet (sudo apt install ufw) sur un réseau connecté."
+  run apt-get update -qq; run apt-get install -y -qq ufw
+fi
 run ufw default deny incoming
 run ufw default allow outgoing
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port 22 proto tcp comment 'SSH depuis le Wi-Fi table'
 [[ "$SSH_FROM_WAN" == "yes" ]] && run ufw limit in on "$WAN_IF" to any port 22 proto tcp comment 'SSH admin eth0'
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$MQTT_PORT" proto tcp comment 'MQTTS'
-run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$API_PORT" proto tcp comment 'API'
+run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$HTTPS_PORT" proto tcp comment 'HTTPS proxy'
+run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$HTTP_PORT" proto tcp comment 'HTTP -> HTTPS'
 run ufw allow in on "$LAN_IF" to any port 67 proto udp comment 'DHCP point d acces'
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port 53 comment 'DNS point d acces'
-run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port 123 proto udp comment 'NTP pour ESP8266'
+run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$NTP_PORT" proto udp comment 'NTP pour ESP8266'
 
 # --- 2. Chaîne DOCKER-USER (Docker contourne les règles INPUT d'UFW) -------------------
 # --ctorigdstport : port publié d'origine (avant la traduction DNAT de Docker).
@@ -99,7 +104,9 @@ block="# BEGIN SENTINEL-X DOCKER-USER
 :DOCKER-USER - [0:0]
 -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
 -A DOCKER-USER -i $LAN_IF -s $LAN_NET -p tcp -m conntrack --ctorigdstport $MQTT_PORT -j RETURN
--A DOCKER-USER -i $LAN_IF -s $LAN_NET -p tcp -m conntrack --ctorigdstport $API_PORT -j RETURN
+-A DOCKER-USER -i $LAN_IF -s $LAN_NET -p tcp -m conntrack --ctorigdstport $HTTPS_PORT -j RETURN
+-A DOCKER-USER -i $LAN_IF -s $LAN_NET -p tcp -m conntrack --ctorigdstport $HTTP_PORT -j RETURN
+-A DOCKER-USER -i $LAN_IF -s $LAN_NET -p udp -m conntrack --ctorigdstport $NTP_PORT -j RETURN
 -A DOCKER-USER -i $LAN_IF -j DROP
 -A DOCKER-USER -i $WAN_IF -j DROP
 -A DOCKER-USER -j RETURN

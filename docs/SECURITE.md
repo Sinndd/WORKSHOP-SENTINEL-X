@@ -63,7 +63,7 @@ ne sert qu'à `POST /api/v1/alerts`. L'ancienne connexion « jeton collé dans l
   verrouillage est en base). Débloquer avec :
   `docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "UPDATE users SET locked_until=NULL, failed_attempts=0 WHERE username='"'"'admin'"'"'"'`
 - **HTTP en clair** : le dashboard est servi en HTTP. Sur un réseau non maîtrisé, placer l'API derrière un reverse
-  proxy HTTPS (Caddy, nginx) et renseigner `TRUSTED_PROXIES`. Ne pas exposer le port 8000 sur Internet tel quel.
+  proxy HTTPS (Caddy, nginx) et renseigner `TRUSTED_PROXIES`. Ne pas exposer le port 8000 sur Internet tel quel. (Fait : le conteneur `proxy` Caddy est le seul point d'entrée, `TRUSTED_PROXIES` vaut son IP fixe `172.30.0.10`.)
 - **Secret TOTP** : stocké en clair en base (accessible au seul rôle `sentinel_app`). Chiffrer la base/le disque si
   le Pi peut être volé.
 - **Mise à jour d'une base existante** : `./scripts/migrate-db.sh` (idempotent ; `start.sh` l'appelle déjà).

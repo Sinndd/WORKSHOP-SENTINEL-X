@@ -4,7 +4,7 @@ Audit défensif de notre propre prototype (stack serveur, firmware ESP8266, câb
 Preuves reproductibles : `./scripts/audit-security.sh` (30 contrôles automatiques sur la stack qui tourne) et
 `python -m unittest` dans `api/` (23 tests). Ce document complète la matrice de sécurité du dossier technique.
 
-**Périmètre** : API + dashboard (`:8000`), broker Mosquitto (`:8883`), PostgreSQL, ingestor, conteneurs, dépôt Git,
+**Périmètre** : API + dashboard (derrière le proxy HTTPS `:443`), broker Mosquitto (`:8883`), PostgreSQL, ingestor, conteneurs, dépôt Git,
 firmware `firmware/sentinel_core`, schéma `hardware/kicad`, notes de câblage.
 **Hors périmètre** : attaques de déni de service volumétriques et MitM actifs (réservés au pentest croisé du jeudi,
 cf. checklist en fin de document), script de vision IA (hors dépôt), sécurité physique du local.
@@ -33,7 +33,7 @@ cf. checklist en fin de document), script de vision IA (hors dépôt), sécurit�
 
 Exécution de `./scripts/audit-security.sh` : **30 réussis, 0 en échec**.
 
-- **Surface** : seuls `8000` et `8883` sont publiés ; PostgreSQL et le MQTT en clair ne le sont pas ; chaque conteneur
+- **Surface** : seuls `443`/`80` (proxy), `123/udp` (NTP) et `8883` sont publiés (l'API `8000` ne l'est pas) ; PostgreSQL et le MQTT en clair ne le sont pas ; chaque conteneur
   est en lecture seule, sans capacité Linux, `no-new-privileges`, hors root, avec limite mémoire ; pas de socket Docker montée.
 - **Authentification** : les 41 routes de données refusent l'accès sans jeton ; le jeton de service ne peut pas administrer ;
   jeton en URL, schéma Basic, jetons `null`/vides refusés ; même réponse pour un compte inconnu et un mauvais mot de passe.
@@ -90,7 +90,7 @@ Le sujet exige « aucun secret ni clé d'authentification en clair » dans l'arc
 
 À exécuter **sur notre propre table** pour préparer la défense, et à comparer avec le rapport des autres groupes :
 
-1. `nmap -sV -p- 192.168.10.1` : seuls `22` (clé SSH uniquement), `8000`, `8883` visibles.
+1. `nmap -sV -p- 192.168.10.1` : seuls `22` (clé SSH uniquement), `80`, `443`, `8883` visibles.
 2. Wireshark sur le Wi-Fi : le trafic MQTT est en *TLS application data* (aucune charge lisible) ; le dashboard est en HTTP
    (limite connue F8, d'où le Wi-Fi WPA2/3 isolé).
 3. Tentative de connexion MQTT anonyme / sans CA / en TLS 1.1 : refusée (déjà prouvé par le script).

@@ -67,13 +67,15 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 ./scripts/migrate-db.sh
-$DOCKER_CMD up -d --build
+# Hors ligne (SENTINEL_OFFLINE=1, cf. install.sh) : images préchargées (docker load), aucun build ni téléchargement.
+BUILD_FLAG="--build"; [[ "${SENTINEL_OFFLINE:-0}" == "1" ]] && BUILD_FLAG="--no-build"
+$DOCKER_CMD up -d $BUILD_FLAG
 
 echo -e "\n${GREEN}======================================================================${NC}"
 echo -e "${GREEN}✅ SYSTÈME SENTINEL-X OPÉRATIONNEL & DURCI${NC}"
 echo -e "${GREEN}======================================================================${NC}"
-echo -e "🌐 Dashboard Tactique   : ${BLUE}http://localhost:8000/dashboard/${NC}"
-echo -e "📄 Documentation API    : ${BLUE}http://localhost:8000/docs${NC}"
+echo -e "🌐 Dashboard Tactique   : ${BLUE}https://localhost/dashboard/${NC}"
+echo -e "📄 Documentation API    : ${BLUE}https://localhost/docs${NC}"
 echo -e "🔒 Broker MQTTS         : ${BLUE}port 8883 (TLS 1.2+ obligatoire)${NC}"
 echo -e "👤 Premier accès         : compte ${YELLOW}admin${NC} (DASHBOARD_USER), mot de passe temporaire = DASHBOARD_PASS dans .env"
 echo -e "   Changement de mot de passe imposé à la 1re connexion, puis créez les comptes dans l'onglet Utilisateurs."

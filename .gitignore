@@ -25,3 +25,7 @@ __pycache__/
 # --- Firmware : secrets de l'appareil ---
 secrets.h
 !secrets.h.example
+
+# --- Paquet hors ligne (scripts/bundle-offline.sh) ---
+sentinel-offline-*.tar.gz
+sentinel-offline-*.tar.gz.sha256
