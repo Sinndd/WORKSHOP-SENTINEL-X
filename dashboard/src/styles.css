@@ -351,6 +351,11 @@ td.num, th.num { text-align: right; }
   white-space: nowrap; padding: 4px 12px; border-radius: 980px; background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(10px);
   opacity: 0; transition: opacity 0.3s, left 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
 .holo:hover .holo-hint { opacity: 1; }
+.holo-btn { position: absolute; left: 14px; bottom: 14px; z-index: 2; width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer;
+  display: inline-grid; place-items: center; color: rgba(255, 255, 255, 0.85); background: rgba(255, 255, 255, 0.12); backdrop-filter: blur(10px);
+  transition: background 0.15s; }
+.holo-btn:hover { background: rgba(255, 255, 255, 0.22); }
+.holo-btn[aria-pressed="true"] { color: #1d1d1f; background: #fff; }
 .holo.cam-expanded .holo-hint { left: 25%; }
 @media (max-width: 720px) { .holo-hint { display: none; } }
 

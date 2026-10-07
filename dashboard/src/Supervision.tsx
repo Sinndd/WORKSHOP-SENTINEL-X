@@ -417,7 +417,8 @@ function Dashboard({
               {/* La scène 3D se resserre à gauche quand la caméra est agrandie : Wall-E se recentre dans l'espace restant. */}
               <div className="holo-stage">
                 <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
-                  <Hologram mode={mode} presence={preview ? preview === "warning" : presence} shifted={camExpanded} />
+                  <Hologram mode={mode} presence={preview ? preview === "warning" : presence} shifted={camExpanded}
+                            sasOpen={Boolean(online && latest?.airlock_open)} />
                 </Suspense>
               </div>
               <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} />

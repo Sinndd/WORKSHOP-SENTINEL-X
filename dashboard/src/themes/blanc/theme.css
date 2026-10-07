@@ -61,4 +61,7 @@
 :root[data-ui-theme="blanc"] .cam-badge.offline { color: #6e6e73; background: #f5f5f7; }
 :root[data-ui-theme="blanc"] .cam-badge.offline i { background: #86868b; }
 :root[data-ui-theme="blanc"] .cam-toggle { color: #1d1d1f; background: rgba(0, 0, 0, 0.06); }
+:root[data-ui-theme="blanc"] .holo-btn { color: #1d1d1f; background: rgba(0, 0, 0, 0.06); }
+:root[data-ui-theme="blanc"] .holo-btn:hover { background: rgba(0, 0, 0, 0.1); }
+:root[data-ui-theme="blanc"] .holo-btn[aria-pressed="true"] { color: #fff; background: #1d1d1f; }
 :root[data-ui-theme="blanc"] .cam-toggle:hover { background: rgba(0, 0, 0, 0.1); }

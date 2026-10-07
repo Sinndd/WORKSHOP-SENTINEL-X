@@ -1,17 +1,19 @@
 // Wall-E en 3D (React Three Fiber + Three.js), en couleurs réelles, piloté par l'état du module SENTINEL-X.
-// Le robot tourne sur son socle ; l'état se lit sur l'anneau du socle et un léger reflet dans les yeux (noirs) :
+// Le robot tourne sur son socle, sa tête suit le curseur, ses bras bougent (coucou au clic) et la trappe du dos
+// s'ouvre avec le sas (ou au clic, pour l'affichage). L'état se lit sur l'anneau du socle (yeux rouges en alerte) :
 //   nominal  : vert, regard qui balaie lentement
 //   warning  : ambre, tête qui scrute vite (présence détectée)
 //   critical : rouge, tête agitée
 //   offline  : bleu acier, tête baissée, yeux éteints
 // Sur un thème clair (<html data-holo="light">), l'anneau est dessiné en mélange normal (pas de lumière additive).
 // Modèle : public/models/wall-e.glb (généré par scripts/convert-model.mjs) avec les nœuds body / neck > head, eyes.
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { Icon } from "./ui";
 
 export type HoloMode = "nominal" | "warning" | "critical" | "offline";
 
@@ -51,13 +53,41 @@ function useBlending(mats: THREE.Material[], light: boolean) {
 const MODEL_URL = `${import.meta.env.BASE_URL}models/wall-e.glb`;
 const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
+// --- Pointeur ------------------------------------------------------------------------------
+/** Position du curseur sur toute la page, en coordonnées normalisées du canvas (-1..1 au bord, au-delà hors canvas),
+ *  et instant du dernier mouvement : Wall-E suit le curseur tant qu'il bouge (puis reprend son comportement). */
+function usePagePointer() {
+  const gl = useThree((st) => st.gl);
+  const ref = useRef({ ndc: new THREE.Vector2(), movedAt: -Infinity });
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const r = gl.domElement.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      ref.current.ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ref.current.movedAt = performance.now();
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [gl]);
+  return ref;
+}
+
+const FOLLOW_MS = 5_000;
+const HATCH_OPEN = -1.35;               // ~77° : la trappe pivote vers l'arrière autour de sa charnière basse
+const WAVE_S = 2.2;
+
 // --- Wall-E -------------------------------------------------------------------------------
-function WallE({ model, mode, presence, light }: { model: THREE.Group; mode: HoloMode; presence: boolean; light: boolean }) {
-  const { scene, neck, eyes, eyeScaleY, eyeMats } = useMemo(() => {
+interface WallEProps {
+  model: THREE.Group; mode: HoloMode; presence: boolean; light: boolean;
+  hatchOpen: boolean; onHatchClick: () => void;
+}
+
+function WallE({ model, mode, presence, light, hatchOpen, onHatchClick }: WallEProps) {
+  const { scene, neck, eyes, eyeScaleY, eyeMats, armL, armR, hatch } = useMemo(() => {
     const scene = model.clone(true);
     const eyeMats: THREE.MeshStandardMaterial[] = [];
     const eyes = scene.getObjectByName("eyes");
-    // Verres (noirs) : matières propres (clonées) pour un léger reflet de la couleur d'état.
+    // Verres (noirs) : matières propres (clonées) pour la pulsation rouge en alerte.
     eyes?.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
@@ -69,35 +99,105 @@ function WallE({ model, mode, presence, light }: { model: THREE.Group; mode: Hol
       });
       m.material = Array.isArray(m.material) ? mats : mats[0];
     });
-    // Le modèle est quantifié : ses nœuds portent une échelle propre (ex. 7,7), que le clignement doit multiplier.
-    return { scene, neck: scene.getObjectByName("neck"), eyes, eyeScaleY: eyes?.scale.y ?? 1, eyeMats };
+    const neck = scene.getObjectByName("neck");
+    if (neck) neck.rotation.order = "YXZ";                 // lacet (gauche/droite) puis tangage (haut/bas)
+    // Le modèle est quantifié : ses nœuds de maillage portent une échelle propre (ex. 7,7), que le clignement
+    // doit multiplier. Bras et trappe sont animés par leurs nœuds-pivots (sans échelle).
+    return { scene, neck, eyes, eyeScaleY: eyes?.scale.y ?? 1, eyeMats,
+             armL: scene.getObjectByName("armL"), armR: scene.getObjectByName("armR"), hatch: scene.getObjectByName("hatch") };
   }, [model]);
 
   useEffect(() => () => eyeMats.forEach((m) => m.dispose()), [eyeMats]);
 
-  const target = useMemo(() => new THREE.Color(), []);
+  const pointer = usePagePointer();
+  const camera = useThree((st) => st.camera);
+  const clock = useThree((st) => st.clock);
+  const tmp = useMemo(() => ({ ray: new THREE.Raycaster(), plane: new THREE.Plane(), hit: new THREE.Vector3(), head: new THREE.Vector3(),
+                               n: new THREE.Vector3(), color: new THREE.Color() }), []);
+  const waveAt = useRef(-Infinity);
+  const [hoverHatch, setHoverHatch] = useState(false);
+  useEffect(() => {
+    document.body.style.cursor = hoverHatch ? "pointer" : "";
+    return () => { document.body.style.cursor = ""; };
+  }, [hoverHatch]);
+
+  const isHatch = (o: THREE.Object3D | null) => { for (; o; o = o.parent) if (o === hatch) return true; return false; };
+
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
-    target.set(palette(light)[mode]);
+    const k = (speed: number) => Math.min(1, dt * speed);
+    tmp.color.set(palette(light)[mode]);
     for (const m of eyeMats) {
-      m.emissive.lerp(target, Math.min(1, dt * 3));
+      m.emissive.lerp(tmp.color, k(3));
       const pulse = mode === "critical" && !REDUCED_MOTION ? 0.55 + 0.45 * Math.sin(t * 8) : 1;
-      m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, mode === "offline" ? 0 : 0.3 * pulse, Math.min(1, dt * 4));
+      // Yeux noirs ; seule l'alerte critique les fait pulser en rouge.
+      m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, mode === "critical" ? 0.35 * pulse : 0, k(4));
     }
-    if (REDUCED_MOTION) return;
+
+    // Trappe : suit l'état (sas ouvert ou ouverture manuelle), même en mouvement réduit.
+    if (hatch) hatch.rotation.x = THREE.MathUtils.lerp(hatch.rotation.x, hatchOpen ? HATCH_OPEN : 0, REDUCED_MOTION ? 1 : k(3));
+
+    // Tête : suit le curseur (tant qu'il bouge), sinon comportement de l'état.
     if (neck) {
-      const yaw = mode === "offline" ? 0 : mode === "critical" ? Math.sin(t * 9) * 0.25
-        : presence || mode === "warning" ? Math.sin(t * 1.8) * 0.75 : Math.sin(t * 0.45) * 0.35;
-      neck.rotation.y = THREE.MathUtils.lerp(neck.rotation.y, yaw, Math.min(1, dt * 4));
-      neck.rotation.x = THREE.MathUtils.lerp(neck.rotation.x, mode === "offline" ? 0.38 : 0, Math.min(1, dt * 2));
+      let yaw: number, pitch: number;
+      const following = mode !== "offline" && mode !== "critical" && performance.now() - pointer.current.movedAt < FOLLOW_MS;
+      if (following) {
+        // Point visé : intersection du rayon caméra -> curseur avec le plan face caméra passant par la tête.
+        neck.getWorldPosition(tmp.head);
+        tmp.n.copy(camera.position).sub(tmp.head).normalize();
+        tmp.plane.setFromNormalAndCoplanarPoint(tmp.n, tmp.head);
+        tmp.ray.setFromCamera(pointer.current.ndc, camera);
+        if (tmp.ray.ray.intersectPlane(tmp.plane, tmp.hit)) {
+          neck.parent!.worldToLocal(tmp.hit).sub(neck.position);
+          yaw = THREE.MathUtils.clamp(Math.atan2(tmp.hit.x, tmp.hit.z), -1.3, 1.3);
+          pitch = THREE.MathUtils.clamp(Math.atan2(-tmp.hit.y, Math.hypot(tmp.hit.x, tmp.hit.z)), -0.45, 0.5);
+        } else { yaw = 0; pitch = 0; }
+      } else if (REDUCED_MOTION) {
+        yaw = 0; pitch = mode === "offline" ? 0.38 : 0;
+      } else {
+        yaw = mode === "offline" ? 0 : mode === "critical" ? Math.sin(t * 9) * 0.25
+          : presence || mode === "warning" ? Math.sin(t * 1.8) * 0.75 : Math.sin(t * 0.45) * 0.35;
+        pitch = mode === "offline" ? 0.38 : 0;
+      }
+      neck.rotation.y = THREE.MathUtils.lerp(neck.rotation.y, yaw, k(following ? 6 : 4));
+      neck.rotation.x = THREE.MathUtils.lerp(neck.rotation.x, pitch, k(following ? 6 : 2));
     }
+
+    // Bras : posture selon l'état ; coucou (bras droit) après un clic sur le robot.
+    const waving = t - waveAt.current < WAVE_S;
+    const still = REDUCED_MOTION;
+    const pose = (side: 1 | -1): [number, number] => {          // [tangage, roulis]
+      if (mode === "offline") return [0.35, 0];
+      if (mode === "critical") return still ? [-0.5, 0] : [-0.45 + Math.sin(t * 7 + (side > 0 ? 0 : Math.PI)) * 0.4, 0];
+      if (mode === "warning") return [-0.35 + (still ? 0 : Math.sin(t * 2 + side) * 0.08), 0];
+      return [still ? 0 : Math.sin(t * 0.8 + (side > 0 ? 0 : Math.PI)) * 0.12, 0];
+    };
+    for (const [arm, side] of [[armL, -1], [armR, 1]] as const) {
+      if (!arm) continue;
+      let [px, pz] = pose(side);
+      if (waving && side === 1 && mode !== "offline") { px = -1.1; pz = still ? 0 : Math.sin(t * 10) * 0.35; }
+      arm.rotation.x = THREE.MathUtils.lerp(arm.rotation.x, px, k(waving ? 8 : 4));
+      arm.rotation.z = THREE.MathUtils.lerp(arm.rotation.z, pz, k(8));
+    }
+
+    if (REDUCED_MOTION) return;
     if (eyes) {                                                                  // clignement toutes les ~4 s
       const blink = mode !== "offline" && t % 4.2 < 0.12;
-      eyes.scale.y = THREE.MathUtils.lerp(eyes.scale.y, eyeScaleY * (blink ? 0.1 : 1), Math.min(1, dt * 30));
+      eyes.scale.y = THREE.MathUtils.lerp(eyes.scale.y, eyeScaleY * (blink ? 0.1 : 1), k(30));
     }
   });
 
-  return <primitive object={scene} />;
+  return (
+    <primitive object={scene}
+      onClick={(e: ThreeEvent<MouseEvent>) => {
+        if (e.delta > 4) return;                               // c'était une rotation de la vue, pas un clic
+        e.stopPropagation();
+        if (isHatch(e.object)) onHatchClick();
+        else waveAt.current = clock.elapsedTime;               // coucou
+      }}
+      onPointerOver={(e: ThreeEvent<PointerEvent>) => setHoverHatch(isHatch(e.object))}
+      onPointerOut={() => setHoverHatch(false)} />
+  );
 }
 
 /** Éclairage « studio » : reflets doux de l'environnement + une lumière principale et un contre-jour. */
@@ -199,8 +299,22 @@ class WebGLBoundary extends Component<{ fallback: ReactNode; children: ReactNode
   render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }
 
-export default function Hologram({ mode, presence, shifted = false }: { mode: HoloMode; presence: boolean; shifted?: boolean }) {
+interface HologramProps {
+  mode: HoloMode;
+  presence: boolean;
+  shifted?: boolean;
+  /** État réel du sas : la trappe du dos de Wall-E s'ouvre avec lui. */
+  sasOpen?: boolean;
+}
+
+export default function Hologram({ mode, presence, shifted = false, sasOpen = false }: HologramProps) {
   const [model, setModel] = useState<THREE.Group | null>(null);
+  // Ouverture manuelle (clic sur la trappe ou bouton) : affichage seulement, rien n'est envoyé au module.
+  // Elle s'efface dès que l'état réel du sas change.
+  const [manualHatch, setManualHatch] = useState<boolean | null>(null);
+  useEffect(() => setManualHatch(null), [sasOpen]);
+  const hatchOpen = manualHatch ?? sasOpen;
+  const toggleHatch = () => setManualHatch(!hatchOpen);
   const [error, setError] = useState<string | null>(null);
   const light = useLightSurface();
   useEffect(() => {
@@ -220,11 +334,18 @@ export default function Hologram({ mode, presence, shifted = false }: { mode: Ho
               aria-label={`Wall-E en 3D, état ${mode}`}>
         <Studio />
         <Projector mode={mode} light={light} />
-        {model && <WallE model={model} mode={mode} presence={presence} light={light} />}
+        {model && <WallE model={model} mode={mode} presence={presence} light={light} hatchOpen={hatchOpen} onHatchClick={toggleHatch} />}
         <FramingShift shifted={shifted} />
         <Controls />
       </Canvas>
       {!model && <div className="holo-fallback">Chargement de Wall-E…</div>}
+      {model && (
+        <button type="button" className="holo-btn" onClick={toggleHatch} aria-pressed={hatchOpen}
+                title={hatchOpen ? "Fermer la trappe (affichage)" : "Ouvrir la trappe (affichage)"}
+                aria-label={hatchOpen ? "Fermer la trappe de Wall-E" : "Ouvrir la trappe de Wall-E"}>
+          <Icon name={hatchOpen ? "unlock" : "lock"} size={15} />
+        </button>
+      )}
     </WebGLBoundary>
   );
 }
