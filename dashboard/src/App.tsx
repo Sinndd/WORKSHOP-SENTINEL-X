@@ -8,6 +8,8 @@ import { Icon } from "./components/ui";
 import SecurityView from "./Security";
 import Supervision from "./Supervision";
 import type { Me } from "./types";
+import ThemeHost, { readStoredTheme, storeTheme } from "./themes/ThemeHost";
+import { THEMES } from "./themes/registry";
 import UsersView from "./Users";
 
 const SESSION_KEY = "sentinel.apiToken";   // sessionStorage : effacé à la fermeture de l'onglet
@@ -35,6 +37,8 @@ export default function App() {
   const [meError, setMeError] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [viewCommands, setViewCommands] = useState<PaletteCommand[]>([]);
+  const [uiTheme, setUiThemeState] = useState(readStoredTheme);
+  const setUiTheme = useCallback((id: string) => { storeTheme(id); setUiThemeState(id); }, []);
 
   const expire = useCallback((message = "Session expirée : veuillez vous reconnecter.") => {
     storeToken(null);
@@ -95,14 +99,18 @@ export default function App() {
   const commands = useMemo<PaletteCommand[]>(() => [
     ...tabs.map((t, i) => ({ id: `view-${t.id}`, group: "Navigation", label: `[${i + 1}] Aller à : ${t.label}`, run: () => setView(t.id) })),
     ...(view === "supervision" ? viewCommands : []),
+    ...THEMES.map((t) => ({ id: `theme-${t.id}`, group: "Thème", label: `Thème : ${t.label}${t.id === uiTheme ? " (actif)" : ""}`,
+      run: () => setUiTheme(t.id) })),
     { id: "logout", group: "Session", label: "Se déconnecter", run: logout },
-  ], [tabs, view, viewCommands, logout]);
+  ], [tabs, view, viewCommands, logout, uiTheme, setUiTheme]);
 
-  if (!token) return <LoginGate notice={notice} onLogin={onLogin} />;
+  const themeHost = <ThemeHost id={uiTheme} />;
+  if (!token) return <>{themeHost}<LoginGate notice={notice} onLogin={onLogin} /></>;
 
   if (!me) {
     return (
       <div className="login-wrapper">
+        {themeHost}
         <div className="card gate login-card">
           {meError ? <>
             <div className="alert-banner error-banner" role="alert">{meError}</div>
@@ -116,6 +124,7 @@ export default function App() {
   if (me.must_change_password) {
     return (
       <div className="login-wrapper">
+        {themeHost}
         <div className="card gate login-card">
           <div className="login-header">
             <span className="logo big" aria-hidden><Icon name="shield" size={26} /></span>
@@ -132,6 +141,7 @@ export default function App() {
 
   return (
     <>
+      {themeHost}
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
@@ -148,6 +158,12 @@ export default function App() {
           </nav>
           <span className="spacer" />
           <Clock />
+          <label className="theme-picker" title="Thème visuel">
+            <span>Thème</span>
+            <select value={uiTheme} onChange={(e) => setUiTheme(e.target.value)} aria-label="Thème visuel">
+              {THEMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </label>
           <button className="kbd-hint" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K">
             Rechercher une commande<kbd>{IS_MAC ? "⌘ K" : "Ctrl K"}</kbd>
           </button>

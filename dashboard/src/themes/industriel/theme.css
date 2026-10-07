@@ -1,0 +1,90 @@
+/* Thème « Industriel » — toutes les règles sont rattachées à :root[data-ui-theme="industriel"].
+ * Série des graphiques #2aa5a0 validée (dataviz) sur la surface #1b1d20. L'orange est réservé à l'interface,
+ * jamais aux données ni aux statuts (l'ambre « vigilance » reste distinct). */
+@import "@fontsource/barlow-condensed/latin-500.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+
+:root[data-ui-theme="industriel"] {
+  --bg: #111214;
+  --surface-1: #1b1d20;
+  --surface-2: #222428;
+  --glass: #1b1d20;
+  --line: #2d3035;
+  --line-strong: #41454c;
+  --grid: #26292d;
+  --axis: #4a4e55;
+  --text-primary: #ecebe6;
+  --text-secondary: #b7b5ad;
+  --text-muted: #85837c;
+  --accent: #ff6a13;
+  --accent-2: #ff6a13;
+  --accent-soft: rgba(255, 106, 19, 0.12);
+  --series-1: #2aa5a0;
+  --wash: rgba(42, 165, 160, 0.08);
+  --radius: 0px;
+  --radius-sm: 0px;
+  --shadow: none;
+  --font-display: "Barlow Condensed", "Inter Variable", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --chamfer: 14px;
+}
+:root[data-ui-theme="industriel"] body { background: #111214; }
+:root[data-ui-theme="industriel"] body::before { display: none; }
+
+/* Panneaux mats à coins biseautés, repère orange à gauche du titre */
+:root[data-ui-theme="industriel"] .card {
+  background: var(--surface-1); backdrop-filter: none; border: 1px solid var(--line);
+  clip-path: polygon(var(--chamfer) 0, 100% 0, 100% calc(100% - var(--chamfer)), calc(100% - var(--chamfer)) 100%, 0 100%, 0 var(--chamfer));
+}
+:root[data-ui-theme="industriel"] .card-head { border-bottom: 1px solid var(--line); padding-bottom: 9px; }
+:root[data-ui-theme="industriel"] .card h2 { font-family: var(--font-display); font-weight: 700; font-size: 16px; text-transform: uppercase; letter-spacing: 0.08em; }
+:root[data-ui-theme="industriel"] .card h2::before { content: ""; width: 4px; height: 16px; background: var(--accent); margin-right: 2px; }
+:root[data-ui-theme="industriel"] .card h2 .ico { color: var(--text-muted); }
+:root[data-ui-theme="industriel"] .tile { background: var(--surface-2); border-color: var(--line); }
+:root[data-ui-theme="industriel"] .tile .label { font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; font-size: 13px; }
+:root[data-ui-theme="industriel"] .tile .label .ico { color: var(--accent); }
+:root[data-ui-theme="industriel"] .tile .value { font-weight: 500; }
+
+/* Barre supérieure : bande de signalisation sous le pupitre */
+:root[data-ui-theme="industriel"] .topbar { background: #16171a; border-bottom: 0; backdrop-filter: none; }
+:root[data-ui-theme="industriel"] .topbar::after { content: ""; display: block; height: 4px;
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 12px, #16171a 12px 24px); }
+:root[data-ui-theme="industriel"] .brand-text strong { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.12em; }
+:root[data-ui-theme="industriel"] .logo { border-radius: 0; background: var(--accent); color: #16171a; box-shadow: none; }
+:root[data-ui-theme="industriel"] .avatar { border-radius: 0; background: #2d3035; color: var(--accent); }
+:root[data-ui-theme="industriel"] .tabs { border-radius: 0; background: none; border: 0; gap: 0; }
+:root[data-ui-theme="industriel"] .tabs button { border-radius: 0; font-family: var(--font-display); font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em;
+  border: 1px solid var(--line); margin-left: -1px; }
+:root[data-ui-theme="industriel"] .tabs button[aria-current="page"] { background: var(--accent); color: #111214; box-shadow: none; border-color: var(--accent); }
+
+/* Contrôles rectangulaires */
+:root[data-ui-theme="industriel"] .btn, :root[data-ui-theme="industriel"] .segmented, :root[data-ui-theme="industriel"] .segmented button,
+:root[data-ui-theme="industriel"] .kbd-hint, :root[data-ui-theme="industriel"] .theme-picker select, :root[data-ui-theme="industriel"] .node-pill,
+:root[data-ui-theme="industriel"] .field-group input, :root[data-ui-theme="industriel"] .field-group select,
+:root[data-ui-theme="industriel"] .table-wrap, :root[data-ui-theme="industriel"] .badge, :root[data-ui-theme="industriel"] .pill,
+:root[data-ui-theme="industriel"] .cam-pip, :root[data-ui-theme="industriel"] .alarm-banner, :root[data-ui-theme="industriel"] .preview-switch,
+:root[data-ui-theme="industriel"] .preview-switch button, :root[data-ui-theme="industriel"] .tooltip, :root[data-ui-theme="industriel"] .palette { border-radius: 0; }
+:root[data-ui-theme="industriel"] .btn { font-family: var(--font-display); font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface-2); }
+:root[data-ui-theme="industriel"] .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--surface-2); }
+:root[data-ui-theme="industriel"] .btn-primary { background: var(--accent); color: #111214; box-shadow: none; }
+:root[data-ui-theme="industriel"] .btn-primary:hover:not(:disabled) { background: #ff8a45; color: #111214; }
+:root[data-ui-theme="industriel"] .segmented button[aria-pressed="true"] { background: #2d3035; box-shadow: inset 0 -2px 0 var(--accent); }
+:root[data-ui-theme="industriel"] .btn-emergency { border-radius: 0; font-family: var(--font-display); font-size: 18px;
+  background: repeating-linear-gradient(-45deg, #b3261e 0 16px, #8f1d17 16px 32px); }
+
+/* Hologramme : écran de contrôle encastré */
+:root[data-ui-theme="industriel"] .holo { background: linear-gradient(rgba(255, 106, 19, 0.03) 1px, transparent 1px) 0 0 / 100% 4px, #0c0d0f; }
+:root[data-ui-theme="industriel"] .holo::before { opacity: 0.15; }
+:root[data-ui-theme="industriel"] th { background: #202226; font-family: var(--font-display); font-size: 13px; }
+:root[data-ui-theme="industriel"] .login-wrapper::before { display: none; }
+:root[data-ui-theme="industriel"] .login-title { background: none; color: var(--accent); font-family: var(--font-display); letter-spacing: 0.14em; }
+:root[data-ui-theme="industriel"] .corp-tag { color: var(--accent); }
+
+/* Fond : trame d'atelier + ligne de balayage (animée par GSAP) */
+.indus-grid { position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 56px 56px; }
+.indus-scan-track { position: absolute; inset: 0; overflow: hidden; }
+.indus-scan { position: absolute; left: 0; right: 0; top: 0; height: 100%;
+  background: linear-gradient(to bottom, transparent 0%, rgba(255, 106, 19, 0.0) 46%, rgba(255, 106, 19, 0.10) 49.6%, rgba(255, 106, 19, 0.35) 50%, transparent 50.4%); }

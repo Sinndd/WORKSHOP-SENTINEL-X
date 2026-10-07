@@ -1,0 +1,72 @@
+/* Thème « Aurora » — toutes les règles sont rattachées à :root[data-ui-theme="aurora"].
+ * Série des graphiques #8b6cf0 validée (dataviz) sur la surface #1b1530. */
+@import "@fontsource-variable/sora/index.css";
+
+:root[data-ui-theme="aurora"] {
+  --bg: #0b0716;
+  --surface-1: #1b1530;
+  --surface-2: #231b3d;
+  --glass: rgba(28, 18, 52, 0.42);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-strong: rgba(255, 255, 255, 0.22);
+  --grid: rgba(255, 255, 255, 0.08);
+  --axis: rgba(255, 255, 255, 0.24);
+  --text-primary: #fbf8ff;
+  --text-secondary: #d4cbe9;
+  --text-muted: #a198c0;
+  --accent: #f0abfc;
+  --accent-2: #8b6cf0;
+  --accent-soft: rgba(240, 171, 252, 0.14);
+  --series-1: #8b6cf0;
+  --wash: rgba(139, 108, 240, 0.12);
+  --radius: 22px;
+  --radius-sm: 15px;
+  --shadow: 0 20px 50px rgba(8, 2, 24, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --font-display: "Sora Variable", "Inter Variable", system-ui, sans-serif;
+}
+:root[data-ui-theme="aurora"] body { background: #0b0716; }
+:root[data-ui-theme="aurora"] body::before { display: none; }
+
+/* Verre dépoli */
+:root[data-ui-theme="aurora"] .card,
+:root[data-ui-theme="aurora"] .topbar {
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.03));
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+}
+:root[data-ui-theme="aurora"] .card { border: 1px solid rgba(255, 255, 255, 0.16); }
+:root[data-ui-theme="aurora"] .topbar { border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+:root[data-ui-theme="aurora"] .card h2 { font-weight: 600; letter-spacing: 0.01em; font-size: 14px; }
+:root[data-ui-theme="aurora"] .card h2 .ico, :root[data-ui-theme="aurora"] .tile .label .ico { color: var(--accent); }
+:root[data-ui-theme="aurora"] .tile { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.10); }
+:root[data-ui-theme="aurora"] .brand-text strong { letter-spacing: 0.14em; }
+:root[data-ui-theme="aurora"] .logo { background: linear-gradient(135deg, #f0abfc, #8b6cf0); color: #1a0b2e; box-shadow: 0 0 26px rgba(240, 171, 252, 0.45); }
+:root[data-ui-theme="aurora"] .avatar { background: linear-gradient(135deg, #f0abfc, #8b6cf0); color: #1a0b2e; }
+
+/* Navigation et contrôles en pilules */
+:root[data-ui-theme="aurora"] .tabs, :root[data-ui-theme="aurora"] .segmented { border-radius: 999px; background: rgba(255, 255, 255, 0.06); }
+:root[data-ui-theme="aurora"] .tabs button, :root[data-ui-theme="aurora"] .segmented button { border-radius: 999px; }
+:root[data-ui-theme="aurora"] .tabs button[aria-current="page"],
+:root[data-ui-theme="aurora"] .segmented button[aria-pressed="true"] {
+  background: linear-gradient(135deg, rgba(240, 171, 252, 0.35), rgba(139, 108, 240, 0.35)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+:root[data-ui-theme="aurora"] .btn { border-radius: 999px; background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.2); }
+:root[data-ui-theme="aurora"] .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.35); }
+:root[data-ui-theme="aurora"] .btn-primary { background: linear-gradient(135deg, #f0abfc, #8b6cf0); color: #1a0b2e; box-shadow: 0 10px 30px rgba(176, 48, 111, 0.35); }
+:root[data-ui-theme="aurora"] .btn-emergency { border-radius: 999px; }
+:root[data-ui-theme="aurora"] .kbd-hint, :root[data-ui-theme="aurora"] .theme-picker select,
+:root[data-ui-theme="aurora"] .node-pill { border-radius: 999px; background: rgba(255, 255, 255, 0.06); }
+:root[data-ui-theme="aurora"] .field-group input, :root[data-ui-theme="aurora"] .field-group select { border-radius: 14px; background: rgba(10, 4, 24, 0.45); }
+
+/* Hologramme : fenêtre sombre et vitrée pour garder le contraste du rendu 3D */
+:root[data-ui-theme="aurora"] .holo { background: radial-gradient(ellipse at 50% 85%, rgba(240, 171, 252, 0.12), transparent 60%), rgba(8, 3, 22, 0.62); }
+:root[data-ui-theme="aurora"] .holo::before { opacity: 0.25; }
+:root[data-ui-theme="aurora"] .cam-pip { border-radius: 16px; background: rgba(8, 3, 22, 0.75); }
+
+/* Tableaux, info-bulles, palette */
+:root[data-ui-theme="aurora"] .table-wrap { border-radius: 16px; }
+:root[data-ui-theme="aurora"] th { background: rgba(36, 24, 66, 0.96); }
+:root[data-ui-theme="aurora"] .tooltip, :root[data-ui-theme="aurora"] .palette { background: rgba(28, 18, 52, 0.92); border-radius: 16px; backdrop-filter: blur(16px); }
+:root[data-ui-theme="aurora"] .palette li[aria-selected="true"] { background: rgba(139, 108, 240, 0.28); }
+:root[data-ui-theme="aurora"] .login-wrapper::before { background: radial-gradient(circle, rgba(240, 171, 252, 0.18), transparent 65%); }
+:root[data-ui-theme="aurora"] .login-title { background: linear-gradient(90deg, #ffffff, #f0abfc); -webkit-background-clip: text; background-clip: text; }

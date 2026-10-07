@@ -1,0 +1,80 @@
+/* Thème « Orbital » — toutes les règles sont rattachées à :root[data-ui-theme="orbital"].
+ * Série des graphiques #5b8cff validée (dataviz) sur la surface #070a14. */
+@import "@fontsource/chakra-petch/latin-500.css";
+@import "@fontsource/chakra-petch/latin-600.css";
+
+:root[data-ui-theme="orbital"] {
+  --bg: #02030a;
+  --surface-1: #070a14;
+  --surface-2: #0b1020;
+  --glass: rgba(6, 9, 20, 0.74);
+  --line: rgba(125, 170, 255, 0.14);
+  --line-strong: rgba(125, 170, 255, 0.28);
+  --grid: rgba(125, 170, 255, 0.08);
+  --axis: rgba(125, 170, 255, 0.25);
+  --text-primary: #eaf2ff;
+  --text-secondary: #a9b8d6;
+  --text-muted: #6c7a99;
+  --accent: #7df9ff;
+  --accent-2: #5b8cff;
+  --accent-soft: rgba(125, 249, 255, 0.10);
+  --series-1: #5b8cff;
+  --wash: rgba(91, 140, 255, 0.10);
+  --radius: 10px;
+  --radius-sm: 8px;
+  --shadow: 0 0 0 1px rgba(125, 170, 255, 0.04), 0 18px 40px rgba(0, 0, 0, 0.6);
+  --font-display: "Chakra Petch", "Inter Variable", system-ui, sans-serif;
+}
+:root[data-ui-theme="orbital"] body { background: radial-gradient(ellipse at 50% -20%, #0b1533 0%, #02030a 60%); }
+:root[data-ui-theme="orbital"] body::before { display: none; }
+
+/* Panneaux : fins, sombres, liseré lumineux en haut */
+:root[data-ui-theme="orbital"] .card { background: var(--glass); backdrop-filter: blur(6px); }
+:root[data-ui-theme="orbital"] .card::after { content: ""; position: absolute; left: 12%; right: 12%; top: -1px; height: 1px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(125, 249, 255, 0.7), transparent); }
+:root[data-ui-theme="orbital"] .card h2 { text-transform: uppercase; letter-spacing: 0.16em; font-size: 12.5px; font-weight: 600; }
+:root[data-ui-theme="orbital"] .card h2 .ico, :root[data-ui-theme="orbital"] .tile .label .ico { color: var(--accent); }
+:root[data-ui-theme="orbital"] .tile .label { text-transform: uppercase; letter-spacing: 0.1em; font-size: 11px; }
+:root[data-ui-theme="orbital"] .brand-text strong { font-family: var(--font-display); letter-spacing: 0.3em; }
+:root[data-ui-theme="orbital"] .logo, :root[data-ui-theme="orbital"] .avatar { background: radial-gradient(circle at 30% 30%, #d8fdff, #5b8cff 70%); color: #02030a; border-radius: 50%; }
+:root[data-ui-theme="orbital"] .topbar { background: rgba(2, 3, 10, 0.7); border-bottom-color: rgba(125, 170, 255, 0.16); }
+
+/* Faisceau lumineux qui fait le tour du cadre de l'hologramme (« border beam ») */
+@property --orbital-beam { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+:root[data-ui-theme="orbital"] .holo-col > .card::before, :root[data-ui-theme="orbital"] .login-card::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 3;
+  background: conic-gradient(from var(--orbital-beam), transparent 0deg 300deg, #5b8cff 330deg, #7df9ff 350deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: orbital-beam 7s linear infinite;
+}
+@keyframes orbital-beam { to { --orbital-beam: 360deg; } }
+
+/* Contrôles : angles vifs, lueur cyan */
+:root[data-ui-theme="orbital"] .tabs button[aria-current="page"] { background: rgba(125, 249, 255, 0.10); box-shadow: inset 0 -2px 0 var(--accent); border-radius: 6px; }
+:root[data-ui-theme="orbital"] .segmented button[aria-pressed="true"] { background: rgba(91, 140, 255, 0.2); box-shadow: inset 0 0 0 1px rgba(125, 249, 255, 0.45); }
+:root[data-ui-theme="orbital"] .btn { border-radius: 6px; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; }
+:root[data-ui-theme="orbital"] .btn:hover:not(:disabled) { box-shadow: 0 0 18px rgba(125, 249, 255, 0.25); }
+:root[data-ui-theme="orbital"] .btn-primary { background: linear-gradient(90deg, #5b8cff, #7df9ff); color: #02030a; }
+:root[data-ui-theme="orbital"] .btn-emergency { border-radius: 6px; }
+
+/* Hologramme : vide spatial */
+:root[data-ui-theme="orbital"] .holo { background: radial-gradient(ellipse at 50% 90%, rgba(125, 249, 255, 0.10), transparent 60%), rgba(1, 2, 8, 0.85); }
+:root[data-ui-theme="orbital"] th { background: #0a0f1e; }
+:root[data-ui-theme="orbital"] .tooltip, :root[data-ui-theme="orbital"] .palette { background: rgba(4, 7, 16, 0.96); border-color: rgba(125, 249, 255, 0.3); }
+
+/* Étoiles filantes (« meteors ») */
+.orbital-meteors { position: absolute; inset: 0; overflow: hidden; }
+.orbital-meteors span { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: #fff; opacity: 0;
+  box-shadow: 0 0 6px 1px rgba(125, 249, 255, 0.8); transform: rotate(215deg); animation: orbital-meteor linear infinite; }
+.orbital-meteors span::after { content: ""; position: absolute; top: 50%; right: 2px; width: 120px; height: 1px; transform: translateY(-50%);
+  background: linear-gradient(90deg, rgba(125, 249, 255, 0.7), transparent); }
+@keyframes orbital-meteor {
+  0% { opacity: 0; transform: rotate(215deg) translateX(0); }
+  8% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(215deg) translateX(-700px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-ui-theme="orbital"] .holo-col > .card::before, :root[data-ui-theme="orbital"] .login-card::before { animation: none; }
+}

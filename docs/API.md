@@ -397,6 +397,22 @@ système), l'hologramme, le bandeau et les clignotements sont figés.
 
 Code dans [`dashboard/`](../dashboard) (Vite + React + TypeScript). L'image Docker de l'API le compile au build.
 
+**Thèmes visuels.** Un sélecteur dans la barre du haut (et la palette Ctrl-K) change la direction artistique sans
+toucher aux composants ni à leur contenu ; le choix est mémorisé par navigateur. Chaque thème est un dossier
+autonome de `dashboard/src/themes/` (`meta.ts`, `index.tsx`, `theme.css`), chargé seulement quand on le choisit.
+**Supprimer un dossier suffit à retirer le thème** (découverte automatique dans `themes/registry.ts`) ; on peut ensuite
+retirer de `package.json` les paquets qu'il était seul à utiliser.
+
+| Thème | Direction artistique | Outils |
+|---|---|---|
+| Nuit (défaut) | bleu nuit, verre, accent cyan | — |
+| `aurora/` | dégradé maillé animé, verre dépoli, accents violet-rose, police Sora | Shader Gradient, Motion (`@shadergradient/react`, `@fontsource-variable/sora`) |
+| `orbital/` | champ d'étoiles 3D, étoiles filantes, faisceau lumineux sur les bordures, police Chakra Petch | React Three Fiber ; effets inspirés de Magic UI / Aceternity (`@fontsource/chakra-petch`) |
+| `industriel/` | pupitre d'usine : graphite mat, orange sécurité, coins biseautés, bandes de signalisation | GSAP (`gsap`, `@fontsource/barlow-condensed`, `@fontsource/ibm-plex-mono`) |
+
+Tous fonctionnent hors ligne (aucune ressource externe), respectent « réduire les animations », et gardent les couleurs
+de statut réservées ; la couleur des courbes de chaque thème est validée pour son fond.
+
 ## 10. Développement
 
 | Tâche | Commande |
