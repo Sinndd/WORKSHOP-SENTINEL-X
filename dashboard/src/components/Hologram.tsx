@@ -259,8 +259,12 @@ function Projector({ mode, light }: { mode: HoloMode; light: boolean }) {
 function FramingShift({ shifted }: { shifted: boolean }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
   useFrame((_, dt) => {
-    const targetOffset = shifted ? camera.getFilmWidth() * 0.25 : 0;   // décalage de 25 % de la largeur
+    // La vidéo agrandie occupe la moitié droite : Wall-E se centre dans la moitié gauche (à 25 % de la largeur).
+    // Décalage d'écran visé : 0,5 en coordonnées normalisées = un quart de la largeur. Pour un décalage de film s
+    // (fraction de sa largeur), le déplacement à l'écran vaut s·zoom / (tan(fov/2)·aspect) : on l'inverse.
     const targetZoom = shifted ? 0.72 : 1;                                // recul : marge avec la vidéo, même en rotation
+    const targetOffset = shifted
+      ? camera.getFilmWidth() * 0.5 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect / targetZoom : 0;
     const k = REDUCED_MOTION ? 1 : 1 - Math.exp(-dt * 7);                  // lissage exponentiel (~0,4 s)
     const offset = THREE.MathUtils.lerp(camera.filmOffset, targetOffset, k);
     const zoom = THREE.MathUtils.lerp(camera.zoom, targetZoom, k);
