@@ -367,7 +367,7 @@ authentification facultative) ; la session est conservée uniquement pour l'ongl
 
 **Identité** épurée, inspirée d'Apple : fond gris très clair, cartes blanches à ombres douces, grands arrondis, boutons
 en pilule et un seul accent bleu (`#0071e3`). Mode sombre automatique selon le réglage du système (accent `#0a84ff`).
-Police système (SF Pro sur Apple, Inter embarquée ailleurs). L'hologramme reste présenté sur fond noir. Interface
+Police système (SF Pro sur Apple, Inter embarquée ailleurs). Wall-E est présenté sur fond noir, comme un produit. Interface
 réduite à l'essentiel : boutons d'outils en **icônes** (libellé en info-bulle et pour les lecteurs d'écran). Les courbes
 utilisent un bleu validé pour chaque mode ; les statuts gardent leurs couleurs réservées avec icône et libellé.
 
@@ -376,7 +376,7 @@ utilisent un bleu validé pour chaque mode ; les statuts gardent leurs couleurs 
 | Barre d'état | sections en icônes, libellé de la section active (touches **1** à **4**), horloge (UTC en info-bulle), thème, recherche de commandes **Ctrl-K / ⌘K**, avatar (ouvre « Mon compte »), déconnexion |
 | Relevés | température, humidité, gaz, présence : valeur actuelle (identifiant, Wi-Fi et mémoire de l'ESP dans l'info-bulle de l'état « En ligne / Hors ligne ») |
 | Commandes | sas (ouvrir / fermer) et alarme (déclencher / couper) en icônes, **arrêt d'urgence en deux clics** (armer puis confirmer sous 5 s) |
-| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **vert** nominal, **ambre** présence ou avertissement reçu depuis moins de 30 s, **rouge** gaz ou température au-dessus du seuil, ou alerte critique reçue depuis moins de 30 s, **bleu acier** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer. **Caméra IA incrustée en haut à droite** : badge **Live** si le script IA a envoyé une image depuis moins de 15 s, **Offline** sinon ; bouton (ou double-clic) pour l'**agrandir** sur la moitié droite du cadre, Wall-E se décalant à gauche |
+| **Wall-E en 3D** | modèle 3D en couleurs réelles (React Three Fiber, éclairage studio) qui tourne sur son socle ; l'anneau du socle et la lueur des yeux reflètent l'état du module : **vert** nominal, **ambre** présence ou avertissement reçu depuis moins de 30 s, **rouge** gaz ou température au-dessus du seuil, ou alerte critique reçue depuis moins de 30 s, **bleu acier** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer. **Caméra IA incrustée en haut à droite** : badge **Live** si le script IA a envoyé une image depuis moins de 15 s, **Offline** sinon ; bouton (ou double-clic) pour l'**agrandir** sur la moitié droite du cadre, Wall-E se décalant à gauche |
 | **Signalisation d'alerte** | en alerte critique : halo rouge pulsant sur les bords de l'écran, bandeau (cause, valeur, seuil, ancienneté) avec bouton **Acquitter**, sirène sonore (icône haut-parleur pour la couper, choix mémorisé ; le navigateur peut demander d'activer le son après un rechargement), titre d'onglet « ⚠ ALERTE », vibration sur téléphone. En vigilance (présence, avertissement) : halo et bandeau ambre, sans son. Tout s'arrête quand la situation redevient normale |
 | Flux d'événements | alertes, passages RFID et commandes, fusionnés par ordre chronologique |
 | Courbes | température et humidité à gauche de l'hologramme, gaz et présence à droite. Curseur synchronisé sur les 4 courbes, flèches ← → au clavier |
@@ -409,7 +409,7 @@ retirer de `package.json` les paquets qu'il était seul à utiliser.
 |---|---|---|
 | Standard (défaut) | épuré façon Apple, clair ou sombre selon le système | — |
 | `aurora/` | dégradé maillé animé, verre dépoli, accents violet-rose, police Sora | Shader Gradient, Motion (`@shadergradient/react`, `@fontsource-variable/sora`) |
-| `blanc/` | façon Apple, tout en blanc et gris clair, toujours clair ; hologramme dessiné pour fond clair | aucune dépendance (option `hologram: "light"` du module de thème) |
+| `blanc/` | façon Apple, tout en blanc et gris clair, toujours clair ; Wall-E sur fond gris clair | aucune dépendance (option `hologram: "light"` du module de thème) |
 | `industriel/` | pupitre d'usine : graphite mat, orange sécurité, coins biseautés, bandes de signalisation | GSAP (`gsap`, `@fontsource/barlow-condensed`, `@fontsource/ibm-plex-mono`) |
 
 Tous fonctionnent hors ligne (aucune ressource externe), respectent « réduire les animations », et gardent les couleurs
