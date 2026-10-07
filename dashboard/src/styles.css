@@ -425,3 +425,31 @@ td.num, th.num { text-align: right; }
   .cam-pip.expanded { left: 14px; width: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .holo-hint { transition: none; } }
+
+/* ------------------------------------------------------------------ signalisation d'alerte */
+.alarm-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 800; animation: alarm-pulse 1.1s ease-in-out infinite; }
+.alarm-overlay.critical { box-shadow: inset 0 0 0 3px rgba(255, 70, 70, 0.95), inset 0 0 160px 40px rgba(208, 40, 40, 0.38); }
+.alarm-overlay.warning { box-shadow: inset 0 0 0 2px rgba(250, 178, 25, 0.75), inset 0 0 110px 24px rgba(250, 178, 25, 0.16); animation-duration: 2.6s; }
+@keyframes alarm-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+.alarm-banner { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 14px; border-radius: 14px; }
+.alarm-banner.critical { color: #fff; border: 1px solid rgba(255, 110, 110, 0.7);
+  background: linear-gradient(100deg, rgba(170, 24, 24, 0.85), rgba(90, 12, 12, 0.85)); box-shadow: 0 0 44px rgba(208, 40, 40, 0.45); }
+.alarm-banner.warning { color: var(--text-primary); border: 1px solid rgba(250, 178, 25, 0.55);
+  background: linear-gradient(100deg, rgba(120, 82, 6, 0.55), rgba(60, 40, 4, 0.55)); }
+.alarm-siren { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; }
+.alarm-banner.critical .alarm-siren { background: #ff4d4d; color: #2a0000; animation: siren 0.9s ease-in-out infinite; }
+.alarm-banner.warning .alarm-siren { background: var(--warning); color: #241800; }
+@keyframes siren { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7); transform: scale(1); } 50% { box-shadow: 0 0 0 12px rgba(255, 77, 77, 0); transform: scale(1.08); } }
+.alarm-text { flex: 1; min-width: 220px; }
+.alarm-text strong { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.08em; text-transform: uppercase; }
+.alarm-text ul { margin: 2px 0 0; padding: 0; list-style: none; font-size: 13.5px; }
+.alarm-detail { opacity: 0.75; }
+.alarm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.alarm-banner.critical .btn { color: #fff; border-color: rgba(255, 255, 255, 0.4); background: rgba(0, 0, 0, 0.2); }
+.alarm-banner .alarm-ack { font-weight: 600; }
+.alarm-banner.critical .alarm-ack { background: #fff; color: #7a0d0d; border-color: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  .alarm-overlay { animation: none; opacity: 0.85; }
+  .alarm-banner.critical .alarm-siren { animation: none; }
+}

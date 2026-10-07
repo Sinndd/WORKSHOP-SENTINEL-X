@@ -3,6 +3,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { download, fetchSnapshot, getJson, postJson, Unauthorized } from "./api";
 import type { PaletteCommand } from "./components/CommandPalette";
 import type { HoloMode } from "./components/Hologram";
+import { AlarmLayer, type AlarmLevel, type AlarmReason } from "./components/AlarmLayer";
 import { LineChart, type Point } from "./components/LineChart";
 import { Card, Icon, StatTile, StatusBadge, type Status } from "./components/ui";
 import { ago, dateTime, num } from "./format";
@@ -143,6 +144,9 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
     }
   };
   const acknowledge = (id: number) => run("Acquittement impossible", () => postJson(`/api/v1/alerts/${id}/ack`, token), "Alerte acquittée");
+  const acknowledgeMany = (ids: number[]) => run("Acquittement impossible",
+    () => Promise.all(ids.map((id) => postJson(`/api/v1/alerts/${id}/ack`, token))),
+    ids.length > 1 ? `${ids.length} alertes acquittées` : "Alerte acquittée");
   const triggerAirlock = (state: boolean) => run("Erreur sas",
     () => postJson("/api/v1/actuators/airlock", token, { state, duration_ms: 3000 }),
     `Commande sas ${state ? "OUVERTURE" : "FERMETURE"} transmise`);
@@ -205,7 +209,7 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
           <Dashboard
             data={data} online={online} now={now} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
             unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token}
-            onAck={acknowledge} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
+            onAck={acknowledge} onAckMany={acknowledgeMany} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
           />
         )}
       </main>
@@ -312,6 +316,7 @@ interface DashboardProps {
   tab: JournalTab;
   setTab: (t: JournalTab) => void;
   onAck: (id: number) => void;
+  onAckMany: (ids: number[]) => void;
   onAirlock: (state: boolean) => void;
   onAlarm: (state: boolean) => void;
   onEmergencyStop: () => void;
@@ -320,7 +325,7 @@ interface DashboardProps {
 }
 
 function Dashboard({
-  data, online, now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
+  data, online, now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck, onAckMany,
   onAirlock, onAlarm, onEmergencyStop, canOperate, token,
 }: DashboardProps) {
   const { agg, latest, alerts, access, commands } = data;
@@ -349,11 +354,23 @@ function Dashboard({
   const tempHigh = (latest?.temperature_celsius ?? 0) >= TEMP_HIGH;
   const presence = Boolean(online && latest?.presence_detected);
   // État actuel du module : mesures en direct + alertes très récentes (pas l'historique non acquitté).
-  const recentAlert = (sev: Severity) => alerts.some((a) => a.severity === sev && !a.acknowledged
+  const recentAlerts = (sev: Severity) => alerts.filter((a) => a.severity === sev && !a.acknowledged
     && now - Date.parse(a.received_at) < RECENT_ALERT_MS);
+  const recentAlert = (sev: Severity) => recentAlerts(sev).length > 0;
   const mode: HoloMode = !online ? "offline"
     : gasHigh || tempHigh || recentAlert("CRITICAL") ? "critical"
     : presence || recentAlert("WARNING") ? "warning" : "nominal";
+
+  // Signalisation plein écran (bandeau, halo, sirène) : même état que l'hologramme.
+  const alarmLevel: AlarmLevel = mode === "critical" ? "critical" : mode === "warning" ? "warning" : null;
+  const alarmAlerts = alarmLevel === "critical" ? recentAlerts("CRITICAL") : alarmLevel === "warning" ? recentAlerts("WARNING") : [];
+  const alarmReasons: AlarmReason[] = [
+    ...(alarmLevel === "critical" && gasHigh ? [{ key: "gas", label: `Gaz élevé : ${num(latest?.gas_raw_ppm, 0)}`, detail: `seuil ${GAS_HIGH}` }] : []),
+    ...(alarmLevel === "critical" && tempHigh ? [{ key: "temp", label: `Température élevée : ${num(latest?.temperature_celsius)} °C`, detail: `seuil ${TEMP_HIGH} °C` }] : []),
+    ...(alarmLevel === "warning" && presence ? [{ key: "pir", label: "Présence détectée", detail: "capteur PIR" }] : []),
+    ...alarmAlerts.map((a) => ({ key: `a${a.id}`, label: `${EVENT_LABELS[a.event_type] ?? a.event_type}${a.details ? ` — ${a.details}` : ""}`,
+      detail: `${a.source_sensor ?? a.channel}, ${ago(a.received_at, now)}` })),
+  ];
 
   const tabs: { id: JournalTab; label: string; count: number }[] = [
     { id: "alerts", label: "Alertes", count: unack.length },
@@ -363,6 +380,8 @@ function Dashboard({
 
   return (
     <div className={loading ? "loading" : undefined}>
+      <AlarmLayer level={alarmLevel} reasons={alarmReasons} ackIds={alarmAlerts.map((a) => a.id)}
+                  canOperate={canOperate} onAck={onAckMany} />
       {/* Haut : courbes de part et d'autre de l'hologramme (caméra incrustée en haut à droite) */}
       <div className="control-room">
         <div className="stack charts-col">
