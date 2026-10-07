@@ -1,5 +1,5 @@
 // Wall-E en 3D (React Three Fiber + Three.js), en couleurs réelles, piloté par l'état du module SENTINEL-X.
-// Le robot tourne sur son socle ; l'état se lit sur l'anneau du socle et la lueur des yeux :
+// Le robot tourne sur son socle ; l'état se lit sur l'anneau du socle et un léger reflet dans les yeux (noirs) :
 //   nominal  : vert, regard qui balaie lentement
 //   warning  : ambre, tête qui scrute vite (présence détectée)
 //   critical : rouge, tête agitée
@@ -53,22 +53,24 @@ const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(pr
 
 // --- Wall-E -------------------------------------------------------------------------------
 function WallE({ model, mode, presence, light }: { model: THREE.Group; mode: HoloMode; presence: boolean; light: boolean }) {
-  const { scene, neck, eyes, eyeMats } = useMemo(() => {
+  const { scene, neck, eyes, eyeScaleY, eyeMats } = useMemo(() => {
     const scene = model.clone(true);
     const eyeMats: THREE.MeshStandardMaterial[] = [];
     const eyes = scene.getObjectByName("eyes");
-    // Lentilles : matières propres (clonées) pour la lueur d'état, sans toucher au reste du modèle.
+    // Verres (noirs) : matières propres (clonées) pour un léger reflet de la couleur d'état.
     eyes?.traverse((o) => {
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
       const mats = (Array.isArray(m.material) ? m.material : [m.material]).map((mat) => {
+        if (!mat.name.startsWith("wall_e1")) return mat;
         const c = (mat as THREE.MeshStandardMaterial).clone();
         eyeMats.push(c);
         return c;
       });
       m.material = Array.isArray(m.material) ? mats : mats[0];
     });
-    return { scene, neck: scene.getObjectByName("neck"), eyes, eyeMats };
+    // Le modèle est quantifié : ses nœuds portent une échelle propre (ex. 7,7), que le clignement doit multiplier.
+    return { scene, neck: scene.getObjectByName("neck"), eyes, eyeScaleY: eyes?.scale.y ?? 1, eyeMats };
   }, [model]);
 
   useEffect(() => () => eyeMats.forEach((m) => m.dispose()), [eyeMats]);
@@ -80,7 +82,7 @@ function WallE({ model, mode, presence, light }: { model: THREE.Group; mode: Hol
     for (const m of eyeMats) {
       m.emissive.lerp(target, Math.min(1, dt * 3));
       const pulse = mode === "critical" && !REDUCED_MOTION ? 0.55 + 0.45 * Math.sin(t * 8) : 1;
-      m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, mode === "offline" ? 0 : 0.9 * pulse, Math.min(1, dt * 4));
+      m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, mode === "offline" ? 0 : 0.3 * pulse, Math.min(1, dt * 4));
     }
     if (REDUCED_MOTION) return;
     if (neck) {
@@ -91,7 +93,7 @@ function WallE({ model, mode, presence, light }: { model: THREE.Group; mode: Hol
     }
     if (eyes) {                                                                  // clignement toutes les ~4 s
       const blink = mode !== "offline" && t % 4.2 < 0.12;
-      eyes.scale.y = THREE.MathUtils.lerp(eyes.scale.y, blink ? 0.1 : 1, Math.min(1, dt * 30));
+      eyes.scale.y = THREE.MathUtils.lerp(eyes.scale.y, eyeScaleY * (blink ? 0.1 : 1), Math.min(1, dt * 30));
     }
   });
 

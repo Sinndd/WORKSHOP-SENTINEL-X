@@ -28,6 +28,7 @@ const input = resolve(process.argv[2] ?? resolve(here, "../../Wall-E+mark+2(2).f
 const output = resolve(here, "../public/models/wall-e.glb");
 
 const EYE_MATERIALS = new Set(["wall_e1", "wall_e1_1", "Color_002"]);   // lentilles et cerclages avant
+const LENS_MATERIALS = new Set(["wall_e1", "wall_e1_1"]);                // verres (textures absentes)
 const NECK_Y = 34;                                                         // au-dessus : tête mobile
 
 const buf = readFileSync(input);
@@ -62,6 +63,22 @@ root.traverse((o) => {
   }
 });
 
+// 1 bis. Verres : ceux du modèle ne ferment pas l'orbite (on voit à travers). Un disque plein, à la taille de chaque
+// verre et juste derrière lui, bouche l'œil ; il porte la matière du verre (noire, cf. gltfMaterial).
+for (const lens of LENS_MATERIALS) {
+  const tris = byMat.eyes.get(lens);
+  if (!tris) continue;
+  const box = new THREE.Box3();
+  for (let i = 0; i < tris.length; i += 3) box.expandByPoint(a.set(tris[i], tris[i + 1], tris[i + 2]));
+  const cx = (box.min.x + box.max.x) / 2, cy = (box.min.y + box.max.y) / 2, z = box.min.z - 0.05;
+  const r = Math.min(box.max.x - box.min.x, box.max.y - box.min.y) / 2 * 1.04;
+  const SEG = 48;
+  for (let k = 0; k < SEG; k++) {
+    const t0 = (k / SEG) * Math.PI * 2, t1 = ((k + 1) / SEG) * Math.PI * 2;
+    tris.push(cx, cy, z, cx + r * Math.cos(t0), cy + r * Math.sin(t0), z, cx + r * Math.cos(t1), cy + r * Math.sin(t1), z);
+  }
+}
+
 // 2. Recentrage : base à y = 0, centre de l'emprise en x/z = 0.
 const all = new THREE.Box3();
 for (const arr of Object.values(parts)) for (let i = 0; i < arr.length; i += 3) all.expandByPoint(a.set(arr[i], arr[i + 1], arr[i + 2]));
@@ -86,9 +103,11 @@ const gltfMaterial = (name) => {
     const { shininess } = matInfo.get(name);
     const gold = /gold/i.test(name);
     // Carrosserie : le « Gold » pur du FBX tire sur le citron ; jaune ocre plus fidèle au personnage.
-    const color = gold ? new THREE.Color("#e2a733").toArray() : matInfo.get(name).color;
-    materials.set(name, doc.createMaterial(name).setBaseColorFactor([...color, 1])
-      .setMetallicFactor(gold ? 0.6 : 0.15).setRoughnessFactor(gold ? 0.35 : Math.max(0.35, 1 - shininess / 100)));
+    // Lentilles des yeux : leurs textures ne sont pas fournies -> noir brillant, visibles des deux côtés (sinon on voit à travers).
+    const lens = LENS_MATERIALS.has(name);
+    const color = lens ? [0.004, 0.004, 0.004] : gold ? new THREE.Color("#e2a733").toArray() : matInfo.get(name).color;
+    materials.set(name, doc.createMaterial(name).setBaseColorFactor([...color, 1]).setDoubleSided(lens)
+      .setMetallicFactor(gold ? 0.6 : 0.15).setRoughnessFactor(lens ? 0.15 : gold ? 0.35 : Math.max(0.35, 1 - shininess / 100)));
   }
   return materials.get(name);
 };
