@@ -22,6 +22,7 @@ export default function ThemeHost({ id }: { id: string }) {
   useEffect(() => {
     const root = document.documentElement;
     setMod(null);
+    delete root.dataset.holo;
     if (id === DEFAULT_THEME.id || !hasTheme(id)) { delete root.dataset.uiTheme; return; }
     root.dataset.uiTheme = id;
     let alive = true;
@@ -29,9 +30,10 @@ export default function ThemeHost({ id }: { id: string }) {
     loadTheme(id)?.then((m) => {
       if (!alive) return;
       setMod(m);
+      if (m.hologram) root.dataset.holo = m.hologram;
       cleanup = m.activate?.();
     });
-    return () => { alive = false; cleanup?.(); };
+    return () => { alive = false; cleanup?.(); delete root.dataset.holo; };
   }, [id]);
 
   const Background = mod?.Background;

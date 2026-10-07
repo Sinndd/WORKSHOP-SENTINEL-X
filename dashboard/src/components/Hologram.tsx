@@ -3,6 +3,8 @@
 //   warning  : ambre, tête qui scrute vite (présence détectée)
 //   critical : rouge, tête agitée, projection instable
 //   offline  : bleu acier clair, tête baissée, projection légèrement instable
+// Sur un thème clair (<html data-holo="light">), mélange normal et teintes plus soutenues : la lumière additive
+// disparaîtrait sur fond blanc.
 // Modèle : public/models/wall-e.glb (généré par scripts/convert-model.mjs) avec les nœuds body / neck > head, eyes.
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -18,6 +20,33 @@ const COLORS: Record<HoloMode, string> = {
   critical: "#ff3b3b",
   offline: "#7091bb",
 };
+const COLORS_LIGHT: Record<HoloMode, string> = {
+  nominal: "#139a4c",
+  warning: "#d98200",
+  critical: "#e0242b",
+  offline: "#5e7393",
+};
+const palette = (light: boolean) => (light ? COLORS_LIGHT : COLORS);
+
+/** Suit l'attribut data-holo posé par le thème actif. */
+function useLightSurface(): boolean {
+  const read = () => document.documentElement.dataset.holo === "light";
+  const [light, setLight] = useState(read);
+  useEffect(() => {
+    const obs = new MutationObserver(() => setLight(read()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-holo"] });
+    return () => obs.disconnect();
+  }, []);
+  return light;
+}
+
+/** Bascule le mode de mélange des matériaux (additif sur fond sombre, normal sur fond clair). */
+function useBlending(mats: THREE.Material[], light: boolean) {
+  useEffect(() => {
+    for (const m of mats) { m.blending = light ? THREE.NormalBlending : THREE.AdditiveBlending; m.needsUpdate = true; }
+  }, [mats, light]);
+}
+
 const MODEL_URL = `${import.meta.env.BASE_URL}models/wall-e.glb`;
 const REDUCED_MOTION = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -79,7 +108,7 @@ function holoMaterial(color: string, opacity: number) {
 }
 
 // --- Wall-E -------------------------------------------------------------------------------
-function WallE({ model, mode, presence }: { model: THREE.Group; mode: HoloMode; presence: boolean }) {
+function WallE({ model, mode, presence, light }: { model: THREE.Group; mode: HoloMode; presence: boolean; light: boolean }) {
   const group = useRef<THREE.Group>(null);
   const { scene, mats, lines, neck, eyes } = useMemo(() => {
     const scene = model.clone(true);
@@ -103,22 +132,25 @@ function WallE({ model, mode, presence }: { model: THREE.Group; mode: HoloMode; 
   }, [model]);
 
   useEffect(() => () => { mats.forEach((m) => m.dispose()); lines.dispose(); }, [mats, lines]);
+  const allMats = useMemo(() => [...mats, lines], [mats, lines]);
+  useBlending(allMats, light);
 
   // Couleur cible lissée pour des transitions d'état douces
   const target = useMemo(() => new THREE.Color(), []);
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
-    target.set(COLORS[mode]);
+    target.set(palette(light)[mode]);
+    const boost = light ? 1.5 : 1;
     for (const m of mats) {
       m.uniforms.uTime.value = t;
       (m.uniforms.uColor.value as THREE.Color).lerp(target, Math.min(1, dt * 3));
       m.uniforms.uFlicker.value = REDUCED_MOTION ? 0 : mode === "offline" ? 0.45 : mode === "critical" ? 0.8 : 0.25;
       m.uniforms.uGlitch.value = REDUCED_MOTION ? 0 : mode === "critical" ? 1 : mode === "offline" ? 0.25 : 0.08;
       // Hors ligne : projection un peu plus transparente (veille), sans disparaître.
-      m.uniforms.uOpacity.value = THREE.MathUtils.lerp(m.uniforms.uOpacity.value, (m === mats[1] ? 2.2 : 1) * (mode === "offline" ? 0.8 : 1), Math.min(1, dt * 3));
+      m.uniforms.uOpacity.value = THREE.MathUtils.lerp(m.uniforms.uOpacity.value, (m === mats[1] ? 2.2 : 1) * boost * (mode === "offline" ? 0.8 : 1), Math.min(1, dt * 3));
     }
     lines.color.lerp(target, Math.min(1, dt * 3));
-    lines.opacity = mode === "offline" ? 0.18 : 0.22;
+    lines.opacity = (mode === "offline" ? 0.18 : 0.22) * (light ? 2.2 : 1);
     if (REDUCED_MOTION) return;
     if (group.current) group.current.position.y = Math.sin(t * 1.2) * 0.5;      // flottement
     if (neck) {
@@ -137,7 +169,7 @@ function WallE({ model, mode, presence }: { model: THREE.Group; mode: HoloMode; 
 }
 
 // --- Socle projecteur : anneaux, cône de lumière, particules -------------------------------
-function Projector({ mode }: { mode: HoloMode }) {
+function Projector({ mode, light }: { mode: HoloMode; light: boolean }) {
   const color = useMemo(() => new THREE.Color(), []);
   const rings = useRef<THREE.Group>(null);
   const cone = useRef<THREE.Mesh>(null);
@@ -163,8 +195,10 @@ function Projector({ mode }: { mode: HoloMode }) {
   const pointMat = useMemo(() => new THREE.PointsMaterial({ size: 0.35, transparent: true, opacity: 0.7,
     blending: THREE.AdditiveBlending, depthWrite: false }), []);
 
+  useBlending(useMemo(() => [ringMat, coneMat, pointMat], [ringMat, coneMat, pointMat]), light);
+
   useFrame(({ clock }, dt) => {
-    color.set(COLORS[mode]);
+    color.set(palette(light)[mode]);
     ringMat.color.lerp(color, Math.min(1, dt * 3));
     (coneMat.uniforms.uColor.value as THREE.Color).lerp(color, Math.min(1, dt * 3));
     pointMat.color.lerp(color, Math.min(1, dt * 3));
@@ -252,6 +286,7 @@ class WebGLBoundary extends Component<{ fallback: ReactNode; children: ReactNode
 export default function Hologram({ mode, presence, shifted = false }: { mode: HoloMode; presence: boolean; shifted?: boolean }) {
   const [model, setModel] = useState<THREE.Group | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const light = useLightSurface();
   useEffect(() => {
     let alive = true;
     new GLTFLoader().loadAsync(MODEL_URL)
@@ -267,8 +302,8 @@ export default function Hologram({ mode, presence, shifted = false }: { mode: Ho
       <Canvas camera={{ position: [62, 38, 70], fov: 38, near: 1, far: 600 }} dpr={[1, 1.75]}
               gl={{ antialias: true, alpha: true, powerPreference: "low-power" }}
               aria-label={`Hologramme de Wall-E, état ${mode}`}>
-        <Projector mode={mode} />
-        {model && <WallE model={model} mode={mode} presence={presence} />}
+        <Projector mode={mode} light={light} />
+        {model && <WallE model={model} mode={mode} presence={presence} light={light} />}
         <FramingShift shifted={shifted} />
         <Controls />
       </Canvas>

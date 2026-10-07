@@ -1,0 +1,64 @@
+/* Thème « Blanc » — toutes les règles sont rattachées à :root[data-ui-theme="blanc"].
+ * Page blanche, panneaux gris très clair sans ombre, interface monochrome (graphite), un seul bleu pour les données.
+ * Série #0071e3 validée (dataviz) sur la surface #f5f5f7. */
+:root[data-ui-theme="blanc"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface-1: #f5f5f7;
+  --surface-2: #ffffff;
+  --glass: #f5f5f7;
+  --line: rgba(0, 0, 0, 0.07);
+  --line-strong: rgba(0, 0, 0, 0.12);
+  --grid: rgba(0, 0, 0, 0.06);
+  --axis: rgba(0, 0, 0, 0.18);
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-muted: #86868b;
+  --accent: #1d1d1f;
+  --accent-2: #1d1d1f;
+  --accent-soft: rgba(0, 0, 0, 0.08);
+  --series-1: #0071e3;
+  --wash: rgba(0, 0, 0, 0.03);
+  --good-text: #1a7f37;
+  --critical-text: #c4151c;
+  --amber: #8a5a00;
+  --radius: 22px;
+  --shadow: none;
+  --topbar-bg: rgba(255, 255, 255, 0.82);
+  --control-bg: rgba(0, 0, 0, 0.05);
+  --control-hover: rgba(0, 0, 0, 0.08);
+  --control-selected: #ffffff;
+  --control-selected-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --input-bg: #ffffff;
+  --popover-bg: rgba(255, 255, 255, 0.97);
+  --warn-bg: #fff6e0;
+}
+:root[data-ui-theme="blanc"] .topbar { border-bottom-color: rgba(0, 0, 0, 0.06); }
+:root[data-ui-theme="blanc"] .logo { background: #f5f5f7; color: #1d1d1f; }
+:root[data-ui-theme="blanc"] .card { box-shadow: none; }
+:root[data-ui-theme="blanc"] .holo-col .card.mode-critical { box-shadow: 0 0 0 2px var(--critical); }
+:root[data-ui-theme="blanc"] .holo-col .card.mode-warning { box-shadow: 0 0 0 2px var(--warning); }
+:root[data-ui-theme="blanc"] .tile, :root[data-ui-theme="blanc"] .node-pill { box-shadow: none; }
+:root[data-ui-theme="blanc"] .filters .node-pill { background: #f5f5f7; }
+:root[data-ui-theme="blanc"] .field-group input, :root[data-ui-theme="blanc"] .field-group select { border-color: transparent; }
+:root[data-ui-theme="blanc"] .field-group input:focus, :root[data-ui-theme="blanc"] .field-group select:focus { border-color: #1d1d1f; box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.06); }
+:root[data-ui-theme="blanc"] .btn-ghost { color: #1d1d1f; }
+:root[data-ui-theme="blanc"] a, :root[data-ui-theme="blanc"] .link-button { color: #1d1d1f; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(0, 0, 0, 0.25); }
+:root[data-ui-theme="blanc"] .state.on { color: #1d1d1f; }
+:root[data-ui-theme="blanc"] .state.on::before { background: #1d1d1f; }
+:root[data-ui-theme="blanc"] .login-card { background: #f5f5f7; }
+:root[data-ui-theme="blanc"] .logo.big { background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+:root[data-ui-theme="blanc"] .alert-banner { box-shadow: none; background: #f5f5f7; }
+:root[data-ui-theme="blanc"] .warn-banner { background: var(--warn-bg); }
+:root[data-ui-theme="blanc"] th { background: #f5f5f7; }
+
+/* Hologramme sur fond clair (rendu « clair » activé par le thème) */
+:root[data-ui-theme="blanc"] .holo { background: radial-gradient(ellipse at 50% 85%, #ffffff, transparent 62%), linear-gradient(180deg, #f5f5f7, #e8e8ed); }
+:root[data-ui-theme="blanc"] .holo-fallback { color: #6e6e73; }
+:root[data-ui-theme="blanc"] .holo-hint { color: #6e6e73; background: rgba(255, 255, 255, 0.8); }
+:root[data-ui-theme="blanc"] .cam-pip { background: #ffffff; color: #86868b; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+:root[data-ui-theme="blanc"] .cam-pip.expanded { background: #ffffff; }
+:root[data-ui-theme="blanc"] .cam-badge.offline { color: #6e6e73; background: #f5f5f7; }
+:root[data-ui-theme="blanc"] .cam-badge.offline i { background: #86868b; }
+:root[data-ui-theme="blanc"] .cam-toggle { color: #1d1d1f; background: rgba(0, 0, 0, 0.06); }
+:root[data-ui-theme="blanc"] .cam-toggle:hover { background: rgba(0, 0, 0, 0.1); }

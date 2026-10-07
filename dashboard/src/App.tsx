@@ -74,15 +74,16 @@ export default function App() {
 
   const isAdmin = me?.role === "admin";
   const tabs = useMemo(() => ([
-    { id: "supervision" as View, label: "Supervision", show: true },
-    { id: "badges" as View, label: "Badges", show: me?.role === "admin" || me?.role === "operator" },
-    { id: "security" as View, label: "Sécurité", show: isAdmin },
-    { id: "users" as View, label: "Utilisateurs", show: isAdmin },
-    { id: "account" as View, label: "Mon compte", show: true },
+    { id: "supervision" as View, label: "Supervision", icon: "gauge", show: true },
+    { id: "badges" as View, label: "Badges", icon: "card", show: me?.role === "admin" || me?.role === "operator" },
+    { id: "security" as View, label: "Sécurité", icon: "lock", show: isAdmin },
+    { id: "users" as View, label: "Utilisateurs", icon: "users", show: isAdmin },
+    { id: "account" as View, label: "Mon compte", icon: "user", show: false },   // accessible par l'avatar
   ]).filter((t) => t.show), [isAdmin, me?.role]);
 
   const ready = Boolean(token && me && !me.must_change_password);
 
+  const accountTab = { id: "account" as View, label: "Mon compte" };
   // Raccourcis : 1-4 = sections, Ctrl/⌘-K = palette de commandes.
   useEffect(() => {
     if (!ready) return;
@@ -98,6 +99,7 @@ export default function App() {
 
   const commands = useMemo<PaletteCommand[]>(() => [
     ...tabs.map((t, i) => ({ id: `view-${t.id}`, group: "Navigation", label: `[${i + 1}] Aller à : ${t.label}`, run: () => setView(t.id) })),
+    { id: "view-account", group: "Navigation", label: `Aller à : ${accountTab.label}`, run: () => setView("account") },
     ...(view === "supervision" ? viewCommands : []),
     ...THEMES.map((t) => ({ id: `theme-${t.id}`, group: "Thème", label: `Thème : ${t.label}${t.id === uiTheme ? " (actif)" : ""}`,
       run: () => setUiTheme(t.id) })),
@@ -146,36 +148,39 @@ export default function App() {
         <div className="topbar-inner">
           <div className="brand">
             <span className="logo" aria-hidden><Icon name="shield" size={18} /></span>
-            <div className="brand-text"><strong>SENTINEL-X</strong><span>AetherCorp · Centre de supervision</span></div>
+            <div className="brand-text"><strong>SENTINEL-X</strong></div>
           </div>
+          {/* Sections en icônes : le libellé n'apparaît que pour la section affichée (info-bulle sur les autres). */}
           <nav className="tabs" aria-label="Sections">
             {tabs.map((t, i) => (
               <button key={t.id} aria-current={view === t.id ? "page" : undefined} onClick={() => setView(t.id)}
-                      aria-keyshortcuts={String(i + 1)}>
-                <kbd>{i + 1}</kbd>{t.label}
+                      aria-keyshortcuts={String(i + 1)} aria-label={t.label} title={`${t.label} (${i + 1})`}>
+                <Icon name={t.icon} size={16} /><span className="tab-label">{t.label}</span>
               </button>
             ))}
           </nav>
           <span className="spacer" />
           <Clock />
-          <label className="theme-picker" title="Thème visuel">
-            <span>Thème</span>
-            <select value={uiTheme} onChange={(e) => setUiTheme(e.target.value)} aria-label="Thème visuel">
-              {THEMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-            </select>
-          </label>
-          <button className="kbd-hint" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K">
-            Rechercher une commande<kbd>{IS_MAC ? "⌘ K" : "Ctrl K"}</kbd>
-          </button>
-          <div className="user-badge" title={`${me.username} — ${ROLE_LABELS[me.role]}`}>
-            <span className="avatar" aria-hidden>{initials(me.full_name || me.username)}</span>
-            <span className="user-meta">
-              <span className="user-name">{me.full_name || me.username}</span>
-              {(me.full_name || me.username) !== ROLE_LABELS[me.role] &&
-                <span className="role-tag">{me.service ? "Compte de service" : ROLE_LABELS[me.role]}</span>}
-            </span>
+          <div className="tool-group">
+            <label className="icon-btn theme-picker" title="Thème">
+              <Icon name="theme" size={17} />
+              <select value={uiTheme} onChange={(e) => setUiTheme(e.target.value)} aria-label="Thème visuel">
+                {THEMES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </label>
+            <button className="icon-btn" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K"
+                    aria-label="Rechercher une commande" title={`Rechercher une commande (${IS_MAC ? "⌘K" : "Ctrl K"})`}>
+              <Icon name="search" size={17} />
+            </button>
+            <button className={`avatar${view === "account" ? " current" : ""}`} onClick={() => setView("account")}
+                    aria-label={`Mon compte : ${me.full_name || me.username}`}
+                    title={`${me.full_name || me.username} — ${me.service ? "Compte de service" : ROLE_LABELS[me.role]}`}>
+              {initials(me.full_name || me.username)}
+            </button>
+            <button className="icon-btn" onClick={logout} aria-label="Se déconnecter" title="Se déconnecter">
+              <Icon name="logout" size={17} />
+            </button>
           </div>
-          <button className="btn btn-sm btn-ghost" onClick={logout}>Déconnexion</button>
         </div>
       </header>
 
@@ -235,9 +240,7 @@ function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Se
         <div className="login-header">
           <motion.span className="logo big" aria-hidden initial={{ rotate: -12, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }}
                        transition={{ delay: 0.1, duration: 0.5 }}><Icon name="shield" size={26} /></motion.span>
-          <span className="corp-tag">AetherCorp Industrial Solutions</span>
           <h1 style={{ margin: 0 }}><span className="login-title">SENTINEL-X</span></h1>
-          <p className="sub">Centre de supervision · accès réservé aux personnes autorisées</p>
         </div>
 
         <div>
@@ -276,7 +279,6 @@ function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Se
             </div>
           )}
         </div>
-        <div className="login-foot"><span>Liaison chiffrée</span><span>Connexions journalisées</span></div>
       </motion.form>
     </div>
   );

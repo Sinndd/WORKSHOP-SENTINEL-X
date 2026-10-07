@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { getJson, send } from "./api";
-import { Card, StatTile, StatusBadge, type Status } from "./components/ui";
+import { Card, Icon, StatTile, StatusBadge, type Status } from "./components/ui";
 import { ago, dateTime } from "./format";
 import { useAction, usePolling } from "./hooks";
 import type { BlockedIp, SecurityEvent, SecuritySummary, SessionRow, Severity } from "./types";
@@ -96,14 +96,14 @@ export default function SecurityView({ token, onExpired }: { token: string; onEx
       </div>
 
       <div className="grid panels" style={{ marginTop: 12 }}>
-        <Card title="Adresses IP bloquées" sub="Blocage automatique après force brute ou essai de nombreux identifiants (en mémoire, levé au redémarrage de l'API)">
+        <Card title="Adresses IP bloquées">
           <div className="table-wrap">
             <table>
               <thead><tr><th>Adresse IP</th><th>Reste</th><th /></tr></thead>
               <tbody>
                 {blocked.map((b) => (
                   <tr key={b.ip}><td className="mono">{b.ip}</td><td>{remaining(b.remaining_s)}</td>
-                    <td><button className="btn btn-sm" onClick={() => release(b.ip)}>Débloquer</button></td></tr>
+                    <td><button className="icon-btn" onClick={() => release(b.ip)} aria-label="Débloquer" title="Débloquer"><Icon name="unlock" size={15} /></button></td></tr>
                 ))}
                 {!blocked.length && <tr><td colSpan={3} className="muted">Aucune adresse bloquée</td></tr>}
               </tbody>
@@ -111,7 +111,7 @@ export default function SecurityView({ token, onExpired }: { token: string; onEx
           </div>
         </Card>
 
-        <Card title="Sessions actives" sub="Toutes les connexions ouvertes ; fermer une session déconnecte immédiatement la personne">
+        <Card title="Sessions actives">
           <div className="table-wrap">
             <table>
               <thead><tr><th>Compte</th><th>Adresse IP</th><th>Activité</th><th /></tr></thead>
@@ -121,7 +121,7 @@ export default function SecurityView({ token, onExpired }: { token: string; onEx
                     <td>{s.full_name}<div className="muted mono">{s.username}</div></td>
                     <td className="mono">{s.ip ?? "—"}</td>
                     <td>{ago(s.last_seen, now)}</td>
-                    <td><button className="btn btn-sm btn-danger" onClick={() => revoke(s)}>Fermer</button></td>
+                    <td><button className="icon-btn danger" onClick={() => revoke(s)} aria-label="Fermer la session" title="Fermer la session"><Icon name="logout" size={15} /></button></td>
                   </tr>
                 ))}
                 {!sessions.length && <tr><td colSpan={4} className="muted">Aucune session</td></tr>}
@@ -132,7 +132,7 @@ export default function SecurityView({ token, onExpired }: { token: string; onEx
       </div>
 
       <div style={{ marginTop: 12 }}>
-        <Card title="Journal de sécurité" sub="Append-only : l'application ne peut ni modifier ni supprimer ces lignes">
+        <Card title="Journal de sécurité">
           <div className="segmented" role="group" aria-label="Gravité" style={{ marginBottom: 10 }}>
             {FILTERS.map((f) => (
               <button key={f.id} aria-pressed={severity === f.id} onClick={() => setSeverity(f.id)}>{f.label}</button>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { getJson, send } from "./api";
-import { Card, StatusBadge } from "./components/ui";
+import { Card, Icon, StatusBadge } from "./components/ui";
 import { dateTime } from "./format";
 import { useAction, usePolling } from "./hooks";
 import type { BadgeRow, Enrollment, UserRow } from "./types";
@@ -72,8 +72,8 @@ function EnrollForm({ token, people, onStarted, onExpired, disabled, compact = f
   };
 
   return (
-    <Card title="Enrôler un badge" icon={compact ? "user" : undefined}
-          sub={compact ? "Écrit un badge sur le lecteur et le rattache à la personne (la trappe s'ouvrira à son passage)." : "Le badge est écrit par le lecteur de l'ESP32 (clés propres à ce badge) puis rattaché à la personne choisie."}>
+    <Card title="Enrôler un badge" icon={compact ? "card" : undefined}
+>
       <form onSubmit={submit} className="form-grid">
         {error && <div className="alert-banner error-banner" role="alert" style={{ gridColumn: "1 / -1" }}>{error}</div>}
         <div className="field-group">
@@ -195,7 +195,7 @@ export default function BadgesView({ token, onExpired }: { token: string; onExpi
                   onStarted={(e) => { setNotice(null); setActive(e); }} />
 
       <div style={{ marginTop: 12 }}>
-        <Card title={`Badges enregistrés (${badges.length})`} sub="Le badge identifie la personne : modifiez le titulaire ici, ou révoquez un badge perdu.">
+        <Card title={`Badges enregistrés (${badges.length})`}>
           <div className="table-wrap tall">
             <table>
               <thead><tr><th>Badge (UID)</th><th>Utilisateur</th><th>Niveau</th><th>Trappe</th><th>État</th><th>Mis à jour</th><th>Actions</th></tr></thead>
@@ -223,7 +223,7 @@ export default function BadgesView({ token, onExpired }: { token: string; onExpi
                           <button className="btn btn-sm btn-primary" disabled={busy || !draft.user_name.trim()} onClick={() => save(b)}>Enregistrer</button>
                           <button className="btn btn-sm" onClick={() => setEditing(null)}>Annuler</button>
                         </>) : (<>
-                          <button className="btn btn-sm" onClick={() => startEdit(b)}>Modifier</button>
+                          <button className="icon-btn" onClick={() => startEdit(b)} aria-label="Modifier le badge" title="Modifier"><Icon name="edit" size={15} /></button>
                           {b.active
                             ? <button className="btn btn-sm btn-danger" onClick={() => setActiveFlag(b, false)}>Révoquer</button>
                             : <button className="btn btn-sm" onClick={() => setActiveFlag(b, true)}>Réactiver</button>}
@@ -232,7 +232,7 @@ export default function BadgesView({ token, onExpired }: { token: string; onExpi
                     </tr>
                   );
                 })}
-                {!badges.length && <tr><td colSpan={7} className="muted">Aucun badge : lancez un enrôlement ci-dessus.</td></tr>}
+                {!badges.length && <tr><td colSpan={7} className="muted">Aucun badge</td></tr>}
               </tbody>
             </table>
           </div>

@@ -19,7 +19,7 @@ const RANGES = [
   { id: "1h", label: "1 h", ms: 3600_000 },
   { id: "6h", label: "6 h", ms: 6 * 3600_000 },
   { id: "24h", label: "24 h", ms: 24 * 3600_000 },
-  { id: "7d", label: "7 jours", ms: 7 * 24 * 3600_000 },
+  { id: "7d", label: "7 j", ms: 7 * 24 * 3600_000 },
 ] as const;
 type RangeId = (typeof RANGES)[number]["id"];
 const LIVE_MS = 1_000;          // état du module + dernière mesure (2 requêtes légères)
@@ -193,17 +193,19 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
 
         <div className="filters" role="toolbar" aria-label="Filtres">
           <NodeStatus device={data?.device ?? null} now={now} />
+          <span className="spacer" />
           <div className="segmented" role="group" aria-label="Période">
             {RANGES.map((r) => (
               <button key={r.id} aria-pressed={range === r.id} onClick={() => setRange(r.id)}>{r.label}</button>
             ))}
           </div>
-          <label className="check">
-            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Temps réel (1 s)
-          </label>
-          <span className="spacer" />
-          <button className="btn btn-sm btn-ghost" onClick={exportCsv}>Exporter CSV</button>
+          <button className={`icon-btn${auto ? " active" : ""}`} aria-pressed={auto} onClick={() => setAuto((a) => !a)}
+                  aria-label="Temps réel (1 s)" title={auto ? "Temps réel actif : suspendre" : "Temps réel suspendu : reprendre"}>
+            <Icon name={auto ? "pause" : "play"} size={15} />
+          </button>
+          <button className="icon-btn" onClick={exportCsv} aria-label="Exporter la télémétrie (CSV)" title="Exporter CSV">
+            <Icon name="download" size={16} />
+          </button>
         </div>
 
         {data && (
@@ -278,12 +280,12 @@ function CameraInset({ token, expanded, onToggle }: { token: string; expanded: b
 function NodeStatus({ device, now }: { device: Device | null; now: number }) {
   if (!device) return <span className="node-pill off"><i aria-hidden />Aucun module</span>;
   const online = device.last_seen != null && now - Date.parse(device.last_seen) < ONLINE_WITHIN_MS;
-  const details = [`Dernier signal ${ago(device.last_seen, now)}`,
+  const details = [device.node_id, `Dernier signal ${ago(device.last_seen, now)}`,
     device.last_wifi_rssi_dbm != null ? `Wi-Fi ${device.last_wifi_rssi_dbm} dBm` : null,
     device.last_free_heap_bytes != null ? `RAM libre ${Math.round(device.last_free_heap_bytes / 1024)} Ko` : null].filter(Boolean).join(" · ");
   return (
     <span className={`node-pill ${online ? "on" : "off"}`} title={details}>
-      <i aria-hidden />{device.node_id} · {online ? "En ligne" : `Hors ligne depuis ${ago(device.last_seen, now).replace("il y a ", "")}`}
+      <i aria-hidden />{online ? "En ligne" : "Hors ligne"}
     </span>
   );
 }
@@ -296,10 +298,10 @@ function EmergencyButton({ onConfirm, disabled }: { onConfirm: () => void; disab
     const id = setTimeout(() => setArmed(false), 5000);
     return () => clearTimeout(id);
   }, [armed]);
-  if (!armed) return <button className="btn-emergency" disabled={disabled} onClick={() => setArmed(true)}>ARRÊT D'URGENCE</button>;
+  if (!armed) return <button className="btn-emergency" disabled={disabled} onClick={() => setArmed(true)}>Arrêt d'urgence</button>;
   return (
     <div className="confirm-row" role="group" aria-label="Confirmer l'arrêt d'urgence">
-      <button className="btn-emergency" onClick={() => { setArmed(false); onConfirm(); }} autoFocus>CONFIRMER L'ARRÊT</button>
+      <button className="btn-emergency" onClick={() => { setArmed(false); onConfirm(); }} autoFocus>Confirmer l'arrêt</button>
       <button className="btn btn-sm" onClick={() => setArmed(false)}>Annuler</button>
     </div>
   );
@@ -331,7 +333,6 @@ function Dashboard({
   onAirlock, onAlarm, onEmergencyStop, canOperate, token, onExpired,
 }: DashboardProps) {
   const { agg, latest, alerts, access, commands } = data;
-  const s = agg.summary;
   const start = Date.parse(agg.since), end = Date.parse(agg.until), bucketMs = agg.bucket_s * 1000;
   const series = useMemo(() => {
     const pts = (pick: (b: Aggregate["buckets"][number]) => number | null): Point[] =>
@@ -344,11 +345,8 @@ function Dashboard({
     };
   }, [agg]);
   const unack = alerts.filter((a) => !a.acknowledged);
-  const byType = Object.keys(EVENT_LABELS).map((k) => ({ label: EVENT_LABELS[k], value: alerts.filter((a) => a.event_type === k).length }));
   const shownAlerts = (unackOnly ? unack : alerts).slice(0, 100);
-  const granted = access.filter((a) => a.access_granted).length;
   const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT, height: 170 };
-  const hasRange = s.samples > 0;
   const [camExpanded, setCamExpanded] = useState(false);
   const [preview, setPreview] = useState<HoloMode | null>(null);
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
@@ -401,14 +399,14 @@ function Dashboard({
         </div>
 
         <div className="holo-col">
-          <Card title="Hologramme · Wall-E MK2" icon="cube" className={`mode-${mode}`}
+          <Card title="Wall-E" icon="cube" className={`mode-${mode}`}
                 actions={<>
                   <div className="preview-switch" role="group" aria-label="Aperçu des états (simulation locale)"
                        title="Aperçu : simule un état sur cet écran uniquement. Recliquer pour revenir à l'état réel.">
                     {(["nominal", "warning", "critical"] as const).map((m) => (
-                      <button key={m} type="button" className={`pv-${m}`} aria-pressed={preview === m}
+                      <button key={m} type="button" className={`pv-${m}`} aria-pressed={preview === m} title={`Aperçu : ${MODE_LABEL[m]}`}
                               onClick={() => setPreview((p) => (p === m ? null : m))}>
-                        <i aria-hidden />{MODE_LABEL[m]}
+                        <i aria-hidden /><span className="sr-only">{MODE_LABEL[m]}</span>
                       </button>
                     ))}
                   </div>
@@ -421,7 +419,6 @@ function Dashboard({
                 <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
                   <Hologram mode={mode} presence={preview ? preview === "warning" : presence} shifted={camExpanded} />
                 </Suspense>
-                <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
               </div>
               <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} />
             </div>
@@ -429,10 +426,10 @@ function Dashboard({
         </div>
 
         <div className="stack charts-col">
-          <Card title="Gaz (pic)" icon="gas" actions={<span>valeur brute</span>}>
+          <Card title="Gaz" icon="gas">
             <LineChart title="Gaz (pic)" unit="" digits={0} points={series.gas} {...chartProps} />
           </Card>
-          <Card title="Présence" icon="user" actions={<span>% du temps</span>}>
+          <Card title="Présence" icon="user" actions={<span>%</span>}>
             <LineChart title="Présence" unit="%" digits={0} domain={[0, 100]} points={series.presence} {...chartProps} />
           </Card>
         </div>
@@ -442,34 +439,30 @@ function Dashboard({
       <div className="bottom-row">
         <Card title="Relevés" icon="gauge">
           <div className="readouts">
-            <StatTile icon="temp" label="Température" value={num(latest?.temperature_celsius)} unit="°C" tone={tempHigh ? "critical" : "neutral"}
-              detail={hasRange ? `${num(s.temperature_min)} – ${num(s.temperature_max)} °C` : undefined} />
-            <StatTile icon="drop" label="Humidité" value={num(latest?.humidity_percent, 0)} unit="%"
-              detail={hasRange ? `${num(s.humidity_min, 0)} – ${num(s.humidity_max, 0)} %` : undefined} />
-            <StatTile icon="gas" label="Gaz" value={num(latest?.gas_raw_ppm, 0)} tone={gasHigh ? "critical" : "neutral"}
-              detail={hasRange ? `pic ${num(s.gas_max, 0)}` : undefined} />
+            <StatTile icon="temp" label="Température" value={num(latest?.temperature_celsius)} unit="°C" tone={tempHigh ? "critical" : "neutral"} />
+            <StatTile icon="drop" label="Humidité" value={num(latest?.humidity_percent, 0)} unit="%" />
+            <StatTile icon="gas" label="Gaz" value={num(latest?.gas_raw_ppm, 0)} tone={gasHigh ? "critical" : "neutral"} />
             <StatTile icon="user" label="Présence" value={latest?.presence_detected == null ? "—" : latest.presence_detected ? "Oui" : "Non"}
-              tone={presence ? "warning" : "neutral"}
-              detail={hasRange ? `${num((s.presence_ratio ?? 0) * 100, 0)} % du temps` : undefined} />
+              tone={presence ? "warning" : "neutral"} />
           </div>
         </Card>
 
-        <Card title="Commandes" icon="bolt" sub={canOperate ? undefined : "Compte en lecture seule : commandes désactivées."}>
+        <Card title="Commandes" icon="bolt" sub={canOperate ? undefined : "Lecture seule"}>
           <fieldset className="ctl" disabled={!canOperate}>
             <div className="ctl-row">
               <div className="ctl-info"><strong>Sas principal</strong>
                 <span className={`state ${latest?.airlock_open ? "on" : ""}`}>{latest?.airlock_open ? "Ouvert" : "Fermé"}</span></div>
               <div className="ctl-btns">
-                <button className="btn btn-sm" onClick={() => onAirlock(true)}>Ouvrir</button>
-                <button className="btn btn-sm" onClick={() => onAirlock(false)}>Fermer</button>
+                <button className="icon-btn" onClick={() => onAirlock(true)} aria-label="Ouvrir le sas" title="Ouvrir"><Icon name="unlock" size={16} /></button>
+                <button className="icon-btn" onClick={() => onAirlock(false)} aria-label="Fermer le sas" title="Fermer"><Icon name="lock" size={16} /></button>
               </div>
             </div>
             <div className="ctl-row">
               <div className="ctl-info"><strong>Alarme</strong>
                 <span className={`state ${latest?.alarm_active ? "alert" : ""}`}>{latest?.alarm_active ? "Active" : "En veille"}</span></div>
               <div className="ctl-btns">
-                <button className="btn btn-sm btn-danger" onClick={() => onAlarm(true)}>Déclencher</button>
-                <button className="btn btn-sm" onClick={() => onAlarm(false)}>Couper</button>
+                <button className="icon-btn danger" onClick={() => onAlarm(true)} aria-label="Déclencher l'alarme" title="Déclencher"><Icon name="bell" size={16} /></button>
+                <button className="icon-btn" onClick={() => onAlarm(false)} aria-label="Couper l'alarme" title="Couper"><Icon name="bell-off" size={16} /></button>
               </div>
             </div>
             <EmergencyButton onConfirm={onEmergencyStop} disabled={!canOperate} />
@@ -478,15 +471,15 @@ function Dashboard({
 
         {canOperate && <QuickEnroll token={token} onExpired={onExpired} />}
 
-        <Card title="Flux d'événements" icon="pulse">
+        <Card title="Événements" icon="pulse">
           <ul className="feed" aria-label="Derniers événements">
             {feed.map((f) => (
               <li key={f.key} className={`lvl-${f.level}`}>
                 <time dateTime={f.ts}>{new Date(f.ts).toLocaleTimeString("fr-FR")}</time>
-                <div><div className="src">{f.src}</div><div className="msg">{f.level === "critical" ? "✕ " : f.level === "warning" ? "▲ " : ""}{f.msg}</div></div>
+                <div title={f.src}><div className="msg">{f.level === "critical" ? "✕ " : f.level === "warning" ? "▲ " : ""}{f.msg}</div></div>
               </li>
             ))}
-            {!feed.length && <li className="empty">Aucun événement sur la période</li>}
+            {!feed.length && <li className="empty">Aucun événement</li>}
           </ul>
         </Card>
       </div>
@@ -503,15 +496,13 @@ function Dashboard({
         {tab === "alerts" && (
           <div>
             <div className="log-tools">
-              <div className="pills">
-                {byType.map((b) => <span className="pill" key={b.label}>{b.label}<b>{b.value}</b></span>)}
-              </div>
+              <span />
               <label className="check"><input type="checkbox" checked={unackOnly} onChange={(e) => setUnackOnly(e.target.checked)} />
-                Non acquittées uniquement</label>
+                Non acquittées</label>
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Heure</th><th>Gravité</th><th>Type</th><th>Capteur</th><th className="num">Valeur</th><th>Détails</th><th>Canal</th><th /></tr></thead>
+                <thead><tr><th>Heure</th><th>Gravité</th><th>Type</th><th>Capteur</th><th className="num">Valeur</th><th>Détails</th><th /></tr></thead>
                 <tbody>
                   {shownAlerts.map((a) => (
                     <tr key={a.id}>
@@ -521,12 +512,12 @@ function Dashboard({
                       <td>{a.source_sensor ?? "—"}</td>
                       <td className="num">{num(a.value, 1)}</td>
                       <td>{a.details ?? "—"}</td>
-                      <td className="muted">{a.channel}</td>
-                      <td>{a.acknowledged ? <span className="muted">Acquittée</span>
-                        : <button className="btn btn-sm" disabled={!canOperate} onClick={() => onAck(a.id)}>Acquitter</button>}</td>
+                      <td className="num">{a.acknowledged ? <span className="muted" title="Acquittée"><Icon name="check" size={15} /></span>
+                        : <button className="icon-btn" disabled={!canOperate} onClick={() => onAck(a.id)} aria-label="Acquitter" title="Acquitter">
+                            <Icon name="check" size={15} /></button>}</td>
                     </tr>
                   ))}
-                  {!shownAlerts.length && <tr><td colSpan={8} className="muted">Aucune alerte</td></tr>}
+                  {!shownAlerts.length && <tr><td colSpan={7} className="muted">Aucune alerte</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -534,7 +525,6 @@ function Dashboard({
         )}
         {tab === "access" && (
           <div>
-            <p className="sub" style={{ marginTop: 0 }}>{access.length} passage(s) : {granted} accordé(s), {access.length - granted} refusé(s)</p>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Heure</th><th>Badge</th><th>Agent</th><th>Porte</th><th>Décision</th></tr></thead>

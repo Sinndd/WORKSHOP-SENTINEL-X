@@ -1,7 +1,7 @@
 import { useCallback, useState, type FormEvent } from "react";
 import { getJson, send } from "./api";
 import { ROLE_LABELS } from "./Account";
-import { Card, StatusBadge } from "./components/ui";
+import { Card, Icon, StatusBadge } from "./components/ui";
 import { ago } from "./format";
 import { useAction, usePolling } from "./hooks";
 import type { Me, Role, UserRow } from "./types";
@@ -40,7 +40,7 @@ function CreateUser({ token, existingNames, onCreated, onExpired }:
   const samePerson = existingNames.filter((n) => n.toLowerCase() === fullName.trim().toLowerCase()).length;
 
   return (
-    <Card title="Créer un compte" sub="Une personne peut avoir plusieurs comptes (ex. un compte opérateur et un compte lecteur) : indiquez le même nom complet.">
+    <Card title="Créer un compte">
       <form onSubmit={submit} className="form-grid">
         {error && <div className="alert-banner error-banner" role="alert" style={{ gridColumn: "1 / -1" }}>{error}</div>}
         <div className="field-group">
@@ -69,7 +69,6 @@ function CreateUser({ token, existingNames, onCreated, onExpired }:
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
           <button className="btn btn-primary" disabled={busy}>{busy ? "Création…" : "Créer le compte"}</button>
-          <span className="muted" style={{ marginLeft: 12 }}>Le titulaire devra changer son mot de passe à la première connexion.</span>
         </div>
       </form>
     </Card>
@@ -116,8 +115,8 @@ export default function UsersView({ token, me, onExpired }: { token: string; me:
             <code className="secret">{secret.password}</code>
           </div>
           <span>
-            <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(secret.password)}>Copier</button>{" "}
-            <button className="btn btn-sm" onClick={() => setSecret(null)}>Masquer</button>
+            <button className="icon-btn" onClick={() => navigator.clipboard?.writeText(secret.password)} aria-label="Copier le mot de passe" title="Copier"><Icon name="copy" size={15} /></button>{" "}
+            <button className="icon-btn" onClick={() => setSecret(null)} aria-label="Masquer" title="Masquer"><Icon name="close" size={15} /></button>
           </span>
         </div>
       )}
@@ -129,7 +128,7 @@ export default function UsersView({ token, me, onExpired }: { token: string; me:
                   }} />
 
       <div style={{ marginTop: 12 }}>
-        <Card title={`Comptes (${users.length})`} sub={`${people.size} personne(s) — regroupés par titulaire`}>
+        <Card title={`Comptes (${users.length})`}>
           <div className="table-wrap tall">
             <table>
               <thead><tr><th>Titulaire</th><th>Identifiant</th><th>Rôle</th><th>État</th><th>2FA</th><th>Sessions</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
@@ -153,16 +152,16 @@ export default function UsersView({ token, me, onExpired }: { token: string; me:
                       <td className="num">{u.active_sessions ?? 0}</td>
                       <td>{ago(u.last_login_at, now)}{u.last_login_ip && <div className="muted mono">{u.last_login_ip}</div>}</td>
                       <td className="actions-cell">
-                        {locked && <button className="btn btn-sm" onClick={() => act(`Déverrouiller ${u.username} ?`,
-                          () => send("POST", `/api/v1/users/${u.id}/unlock`, token), "Compte déverrouillé.")}>Déverrouiller</button>}
-                        <button className="btn btn-sm" onClick={() => resetPassword(u)}>Mot de passe</button>
-                        {u.totp_enabled && <button className="btn btn-sm" onClick={() => act(`Retirer la double authentification de ${u.username} ?`,
-                          () => send("POST", `/api/v1/users/${u.id}/reset-2fa`, token), "2FA retirée.")}>Reset 2FA</button>}
-                        {(u.active_sessions ?? 0) > 0 && !self && <button className="btn btn-sm" onClick={() => act(`Fermer toutes les sessions de ${u.username} ?`,
-                          () => send("POST", `/api/v1/users/${u.id}/revoke-sessions`, token), "Sessions fermées.")}>Déconnecter</button>}
+                        {locked && <button className="icon-btn" onClick={() => act(`Déverrouiller ${u.username} ?`,
+                          () => send("POST", `/api/v1/users/${u.id}/unlock`, token), "Compte déverrouillé.")} aria-label="Déverrouiller" title="Déverrouiller"><Icon name="unlock" size={15} /></button>}
+                        <button className="icon-btn" onClick={() => resetPassword(u)} aria-label="Réinitialiser le mot de passe" title="Réinitialiser le mot de passe"><Icon name="key" size={15} /></button>
+                        {u.totp_enabled && <button className="icon-btn" onClick={() => act(`Retirer la double authentification de ${u.username} ?`,
+                          () => send("POST", `/api/v1/users/${u.id}/reset-2fa`, token), "2FA retirée.")} aria-label="Retirer la double authentification" title="Retirer la double authentification"><Icon name="shield-off" size={15} /></button>}
+                        {(u.active_sessions ?? 0) > 0 && !self && <button className="icon-btn" onClick={() => act(`Fermer toutes les sessions de ${u.username} ?`,
+                          () => send("POST", `/api/v1/users/${u.id}/revoke-sessions`, token), "Sessions fermées.")} aria-label="Fermer ses sessions" title="Fermer ses sessions"><Icon name="logout" size={15} /></button>}
                         {!self && (u.active
-                          ? <button className="btn btn-sm btn-danger" onClick={() => patch(u, { active: false }, "Compte désactivé.", `Désactiver ${u.username} ? Il sera déconnecté immédiatement.`)}>Désactiver</button>
-                          : <button className="btn btn-sm" onClick={() => patch(u, { active: true }, "Compte réactivé.", `Réactiver ${u.username} ?`)}>Réactiver</button>)}
+                          ? <button className="icon-btn danger" onClick={() => patch(u, { active: false }, "Compte désactivé.", `Désactiver ${u.username} ? Il sera déconnecté immédiatement.`)} aria-label="Désactiver" title="Désactiver"><Icon name="user-off" size={15} /></button>
+                          : <button className="icon-btn" onClick={() => patch(u, { active: true }, "Compte réactivé.", `Réactiver ${u.username} ?`)} aria-label="Réactiver" title="Réactiver"><Icon name="user-on" size={15} /></button>)}
                       </td>
                     </tr>
                   );
@@ -171,7 +170,6 @@ export default function UsersView({ token, me, onExpired }: { token: string; me:
               </tbody>
             </table>
           </div>
-          <p className="sub" style={{ marginTop: 8 }}>Les comptes ne sont jamais supprimés (traçabilité du journal de sécurité) : désactivez-les.</p>
         </Card>
       </div>
     </div>

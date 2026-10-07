@@ -102,11 +102,12 @@ export function AlarmLayer({ level, reasons, ackIds, canOperate, onAck, preview 
           </ul>
         </div>
         <div className="alarm-actions">
-          {siren.blocked && <button className="btn btn-sm" onClick={siren.unlock}>Activer le son</button>}
+          {siren.blocked && <button className="icon-btn" onClick={siren.unlock} aria-label="Activer le son" title="Activer le son">
+            <Icon name="volume" size={16} /></button>}
           {critical && (
-            <button className="btn btn-sm btn-ghost" onClick={toggleMute} aria-pressed={muted}
-                    title={muted ? "Réactiver la sirène" : "Couper la sirène"}>
-              {muted ? "Son coupé" : "Couper le son"}
+            <button className="icon-btn" onClick={toggleMute} aria-pressed={muted}
+                    aria-label={muted ? "Réactiver la sirène" : "Couper la sirène"} title={muted ? "Réactiver la sirène" : "Couper la sirène"}>
+              <Icon name={muted ? "mute" : "volume"} size={16} />
             </button>
           )}
           {ackIds.length > 0 && (

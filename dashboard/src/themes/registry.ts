@@ -1,6 +1,6 @@
 // Registre des thèmes visuels. Chaque thème est un dossier autonome de src/themes/ :
 //   meta.ts     -> { id, label, description }        (chargé tout de suite, pour le sélecteur)
-//   index.tsx   -> { Background?, activate? }        (chargé à la demande, avec son theme.css)
+//   index.tsx   -> { Background?, activate?, hologram? }        (chargé à la demande, avec son theme.css)
 // Supprimer un dossier suffit à retirer le thème : il est découvert automatiquement, rien d'autre à modifier.
 import type { ComponentType } from "react";
 
@@ -10,6 +10,8 @@ export interface ThemeModule {
   Background?: ComponentType;
   /** Effets globaux à l'activation ; renvoie la fonction de nettoyage. */
   activate?: () => (() => void) | void;
+  /** « light » : l'hologramme est dessiné pour un fond clair (mélange normal au lieu de lumière additive). */
+  hologram?: "light";
 }
 
 export const DEFAULT_THEME: ThemeMeta = { id: "default", label: "Standard", description: "Épuré, clair ou sombre selon le système" };
