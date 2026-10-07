@@ -12,7 +12,7 @@ export interface ThemeModule {
   activate?: () => (() => void) | void;
 }
 
-export const DEFAULT_THEME: ThemeMeta = { id: "default", label: "Nuit", description: "Thème d'origine : bleu nuit, verre, accent cyan" };
+export const DEFAULT_THEME: ThemeMeta = { id: "default", label: "Standard", description: "Épuré, clair ou sombre selon le système" };
 
 const metas = import.meta.glob<{ default: ThemeMeta }>("./*/meta.ts", { eager: true });
 const loaders = import.meta.glob<{ default: ThemeModule }>("./*/index.tsx");

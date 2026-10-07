@@ -365,9 +365,10 @@ Le badge écrit est rattaché automatiquement à l'utilisateur (table `badges`).
 fonctionne donc sur le Wi-Fi de la table, même sans Internet. Connexion par compte (identifiant + mot de passe, double
 authentification facultative) ; la session est conservée uniquement pour l'onglet (`sessionStorage`).
 
-**Identité** « centre de commandement » : fond bleu nuit, panneaux translucides, accent cyan ; polices Inter, Space
-Grotesk et JetBrains Mono (chiffres) embarquées. Les courbes utilisent un bleu validé pour le fond sombre, les statuts
-gardent leurs couleurs réservées avec icône et libellé.
+**Identité** épurée, inspirée d'Apple : fond gris très clair, cartes blanches à ombres douces, grands arrondis, boutons
+en pilule et un seul accent bleu (`#0071e3`). Mode sombre automatique selon le réglage du système (accent `#0a84ff`).
+Police système (SF Pro sur Apple, Inter embarquée ailleurs). L'hologramme reste présenté sur fond noir. Les courbes
+utilisent un bleu validé pour chaque mode ; les statuts gardent leurs couleurs réservées avec icône et libellé.
 
 | Zone | Contenu |
 |---|---|
@@ -405,7 +406,7 @@ retirer de `package.json` les paquets qu'il était seul à utiliser.
 
 | Thème | Direction artistique | Outils |
 |---|---|---|
-| Nuit (défaut) | bleu nuit, verre, accent cyan | — |
+| Standard (défaut) | épuré façon Apple, clair ou sombre selon le système | — |
 | `aurora/` | dégradé maillé animé, verre dépoli, accents violet-rose, police Sora | Shader Gradient, Motion (`@shadergradient/react`, `@fontsource-variable/sora`) |
 | `orbital/` | champ d'étoiles 3D, étoiles filantes, faisceau lumineux sur les bordures, police Chakra Petch | React Three Fiber ; effets inspirés de Magic UI / Aceternity (`@fontsource/chakra-petch`) |
 | `industriel/` | pupitre d'usine : graphite mat, orange sécurité, coins biseautés, bandes de signalisation | GSAP (`gsap`, `@fontsource/barlow-condensed`, `@fontsource/ibm-plex-mono`) |
