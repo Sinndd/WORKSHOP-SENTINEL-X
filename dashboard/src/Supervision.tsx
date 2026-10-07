@@ -350,6 +350,7 @@ function Dashboard({
   const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT, height: 170 };
   const hasRange = s.samples > 0;
   const [camExpanded, setCamExpanded] = useState(false);
+  const [preview, setPreview] = useState<HoloMode | null>(null);
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
 
   const gasHigh = (latest?.gas_raw_ppm ?? 0) >= GAS_HIGH;
@@ -359,14 +360,18 @@ function Dashboard({
   const recentAlerts = (sev: Severity) => alerts.filter((a) => a.severity === sev && !a.acknowledged
     && now - Date.parse(a.received_at) < RECENT_ALERT_MS);
   const recentAlert = (sev: Severity) => recentAlerts(sev).length > 0;
-  const mode: HoloMode = !online ? "offline"
+  const liveMode: HoloMode = !online ? "offline"
     : gasHigh || tempHigh || recentAlert("CRITICAL") ? "critical"
     : presence || recentAlert("WARNING") ? "warning" : "nominal";
+  // Aperçu : simulation locale d'un état (rien n'est envoyé à l'ESP ni enregistré), pour démonstration.
+  const mode: HoloMode = preview ?? liveMode;
 
   // Signalisation plein écran (bandeau, halo, sirène) : même état que l'hologramme.
   const alarmLevel: AlarmLevel = mode === "critical" ? "critical" : mode === "warning" ? "warning" : null;
-  const alarmAlerts = alarmLevel === "critical" ? recentAlerts("CRITICAL") : alarmLevel === "warning" ? recentAlerts("WARNING") : [];
-  const alarmReasons: AlarmReason[] = [
+  const alarmAlerts = preview ? [] : alarmLevel === "critical" ? recentAlerts("CRITICAL") : alarmLevel === "warning" ? recentAlerts("WARNING") : [];
+  const alarmReasons: AlarmReason[] = preview
+    ? [{ key: "preview", label: `Simulation de l'état « ${MODE_LABEL[preview]} »`, detail: "aperçu local, aucune donnée réelle" }]
+    : [
     ...(alarmLevel === "critical" && gasHigh ? [{ key: "gas", label: `Gaz élevé : ${num(latest?.gas_raw_ppm, 0)}`, detail: `seuil ${GAS_HIGH}` }] : []),
     ...(alarmLevel === "critical" && tempHigh ? [{ key: "temp", label: `Température élevée : ${num(latest?.temperature_celsius)} °C`, detail: `seuil ${TEMP_HIGH} °C` }] : []),
     ...(alarmLevel === "warning" && presence ? [{ key: "pir", label: "Présence détectée", detail: "capteur PIR" }] : []),
@@ -383,7 +388,7 @@ function Dashboard({
   return (
     <div className={loading ? "loading" : undefined}>
       <AlarmLayer level={alarmLevel} reasons={alarmReasons} ackIds={alarmAlerts.map((a) => a.id)}
-                  canOperate={canOperate} onAck={onAckMany} />
+                  canOperate={canOperate} onAck={onAckMany} preview={preview !== null} />
       {/* Haut : courbes de part et d'autre de l'hologramme (caméra incrustée en haut à droite) */}
       <div className="control-room">
         <div className="stack charts-col">
@@ -397,13 +402,24 @@ function Dashboard({
 
         <div className="holo-col">
           <Card title="Hologramme · Wall-E MK2" icon="cube" className={`mode-${mode}`}
-                actions={<StatusBadge status={mode === "nominal" ? "good" : mode === "warning" ? "warning" : mode === "critical" ? "critical" : "neutral"}>
-                  {MODE_LABEL[mode]}</StatusBadge>}>
+                actions={<>
+                  <div className="preview-switch" role="group" aria-label="Aperçu des états (simulation locale)"
+                       title="Aperçu : simule un état sur cet écran uniquement. Recliquer pour revenir à l'état réel.">
+                    {(["nominal", "warning", "critical"] as const).map((m) => (
+                      <button key={m} type="button" className={`pv-${m}`} aria-pressed={preview === m}
+                              onClick={() => setPreview((p) => (p === m ? null : m))}>
+                        <i aria-hidden />{MODE_LABEL[m]}
+                      </button>
+                    ))}
+                  </div>
+                  <StatusBadge status={mode === "nominal" ? "good" : mode === "warning" ? "warning" : mode === "critical" ? "critical" : "neutral"}>
+                    {MODE_LABEL[mode]}{preview && " (aperçu)"}</StatusBadge>
+                </>}>
             <div className={`holo flush${camExpanded ? " cam-expanded" : ""}`}>
               {/* La scène 3D se resserre à gauche quand la caméra est agrandie : Wall-E se recentre dans l'espace restant. */}
               <div className="holo-stage">
                 <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
-                  <Hologram mode={mode} presence={presence} shifted={camExpanded} />
+                  <Hologram mode={mode} presence={preview ? preview === "warning" : presence} shifted={camExpanded} />
                 </Suspense>
                 <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
               </div>

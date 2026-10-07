@@ -65,18 +65,19 @@ interface Props {
   ackIds: number[];               // alertes non acquittées que le bouton « Acquitter » traite
   canOperate: boolean;
   onAck: (ids: number[]) => void;
+  preview?: boolean;              // état simulé (boutons d'aperçu) : signalé comme tel
 }
 
-export function AlarmLayer({ level, reasons, ackIds, canOperate, onAck }: Props) {
+export function AlarmLayer({ level, reasons, ackIds, canOperate, onAck, preview = false }: Props) {
   const [muted, setMuted] = useState(readMuted);
   const siren = useSiren(level === "critical", muted);
 
   // Titre de l'onglet : l'alerte se voit même quand le tableau de bord n'est pas l'onglet actif.
   useEffect(() => {
     if (level !== "critical") return;
-    document.title = `⚠ ALERTE · ${BASE_TITLE}`;
+    document.title = `⚠ ${preview ? "APERÇU" : "ALERTE"} · ${BASE_TITLE}`;
     return () => { document.title = BASE_TITLE; };
-  }, [level]);
+  }, [level, preview]);
 
   const toggleMute = () => {
     setMuted((m) => {
@@ -93,7 +94,7 @@ export function AlarmLayer({ level, reasons, ackIds, canOperate, onAck }: Props)
       <div className={`alarm-banner ${level}`} role="alert" aria-live="assertive">
         <span className="alarm-siren" aria-hidden><Icon name={critical ? "bell" : "user"} size={20} /></span>
         <div className="alarm-text">
-          <strong>{critical ? "Alerte critique" : "Vigilance"}</strong>
+          <strong>{critical ? "Alerte critique" : "Vigilance"}</strong>{preview && <span className="alarm-preview">Aperçu</span>}
           <ul>
             {reasons.map((r) => (
               <li key={r.key}>{r.label}{r.detail && <span className="alarm-detail"> · {r.detail}</span>}</li>
