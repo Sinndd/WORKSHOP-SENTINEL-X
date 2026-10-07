@@ -115,4 +115,10 @@ async def security_headers(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     if request.url.path.startswith("/dashboard"):
         response.headers["Content-Security-Policy"] = CSP
+        # Fichiers de build à nom haché : immuables. Le reste (index.html, modèle 3D) est revalidé à chaque
+        # chargement (ETag -> 304) pour qu'une nouvelle version soit vue sans vider le cache du navigateur.
+        if request.url.path.startswith("/dashboard/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
     return response
