@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 from . import config
 from .db import SQL_ENSURE_DEVICE, pool
 from .models import (CARD_UID_RE, AccessEventOut, AirlockAction, AlarmAction, AlertIn, AlertOut, BadgeIn, BadgeOut,
-                     Command, CommandOut, DeviceOut, Severity, TelemetryAggregate,
+                     Command, CommandOut, DeviceOut, EnrollIn, EnrollmentOut, Severity, TelemetryAggregate,
                      TelemetryOut, VisionEventOut, resolve_ts)
 from .mqtt_bridge import bridge
 from .auth import client_ip, rate_limited, require_device_or_operator, require_operator, require_viewer
@@ -208,6 +208,61 @@ def revoke_badge(card_uid: CardUidPath):
                            (card_uid.upper(),)).fetchone()
     if row is None:
         raise HTTPException(404, "badge inconnu")
+    return row
+
+
+# --- Enrôlement de badges (mode écriture de l'ESP32 piloté depuis le tableau de bord) ----------------
+SQL_EXPIRE_ENROLLMENTS = "UPDATE badge_enrollments SET status = 'TIMEOUT', finished_at = now() WHERE status = 'PENDING' AND expires_at < now()"
+
+
+@router.post("/enrollments", status_code=202, response_model=EnrollmentOut, tags=["accès RFID"], dependencies=operator)
+def start_enrollment(req: EnrollIn):
+    """Demande l'enrôlement d'un badge : l'ESP32 passe en mode écriture pendant `duration_s` secondes ; le premier badge
+    présenté est écrit puis rattaché à `user_name` (badge actif, voir GET /enrollments/{id}). Un seul enrôlement à la fois."""
+    with pool.connection() as conn, conn.transaction():
+        conn.execute(SQL_EXPIRE_ENROLLMENTS)
+        if conn.execute("SELECT 1 FROM badge_enrollments WHERE status = 'PENDING'").fetchone():
+            raise HTTPException(409, "un enrôlement est déjà en cours : l'annuler ou attendre sa fin")
+        row = conn.execute(
+            """INSERT INTO badge_enrollments (user_name, clearance_level, auto_unlock_door, expires_at)
+               VALUES (%s, %s, %s, now() + make_interval(secs => %s)) RETURNING *""",
+            (req.user_name.strip(), req.clearance_level, req.auto_unlock_door, req.duration_s)).fetchone()
+    try:
+        bridge.publish(config.TOPIC_COMMANDS, {"action": "ENROLL_BADGE", "enroll_id": row["id"], "duration_s": req.duration_s},
+                       "ENROLL_BADGE")
+    except RuntimeError as exc:
+        with pool.connection() as conn:
+            conn.execute("UPDATE badge_enrollments SET status = 'FAILED', error = %s, finished_at = now() WHERE id = %s",
+                         (str(exc)[:200], row["id"]))
+        raise HTTPException(503, str(exc)) from None
+    return row
+
+
+@router.get("/enrollments/{enroll_id}", response_model=EnrollmentOut, tags=["accès RFID"], dependencies=operator)
+def get_enrollment(enroll_id: Annotated[int, Path(ge=1)]):
+    with pool.connection() as conn:
+        conn.execute(SQL_EXPIRE_ENROLLMENTS)
+        row = conn.execute("SELECT * FROM badge_enrollments WHERE id = %s", (enroll_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "enrôlement inconnu")
+    return row
+
+
+@router.delete("/enrollments/{enroll_id}", response_model=EnrollmentOut, tags=["accès RFID"], dependencies=operator)
+def cancel_enrollment(enroll_id: Annotated[int, Path(ge=1)]):
+    """Annule un enrôlement en cours (l'ESP32 quitte le mode écriture)."""
+    with pool.connection() as conn:
+        row = conn.execute("""UPDATE badge_enrollments SET status = 'CANCELLED', finished_at = now()
+                              WHERE id = %s AND status = 'PENDING' RETURNING *""", (enroll_id,)).fetchone()
+        if row is None:
+            existing = conn.execute("SELECT * FROM badge_enrollments WHERE id = %s", (enroll_id,)).fetchone()
+            if existing is None:
+                raise HTTPException(404, "enrôlement inconnu")
+            return existing   # déjà terminé : rien à annuler
+    try:
+        bridge.publish(config.TOPIC_COMMANDS, {"action": "ENROLL_CANCEL", "enroll_id": enroll_id}, "ENROLL_CANCEL")
+    except RuntimeError:
+        pass   # l'ESP32 quittera de lui-même à l'expiration
     return row
 
 

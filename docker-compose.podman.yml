@@ -4,11 +4,16 @@
 # - user 0:0 : en rootless, « root » du conteneur = votre utilisateur (lit server.key en 0600) ;
 # - ports > 1024 : un utilisateur ne peut pas lier 80/443/123 (HTTPS sur 8443, redirection HTTP sur 8080, NTP sur 12300).
 services:
-  mosquitto: { security_opt: ["label=disable"], user: "0:0" }
+  # mosquitto : NE PAS le lancer par compose sous podman rootless. En « user 0:0 » avec cap_drop ALL il plante
+  # (« Error setting groups whilst dropping privileges »), et sans cela il ne peut pas lire server.key (0600). Le lancer à la main :
+  #   docker run -d --name sentinel-mosquitto-1 --network sentinel_backend --network sentinel_frontend --network-alias mosquitto \
+  #     --security-opt label=disable --user "$(id -u):$(id -g)" --userns=keep-id -p 8883:8883 -v ./mosquitto/...  (cf. docker-compose.yml)
+  mosquitto: { security_opt: ["label=disable"] }   # démarré à la main : lancer compose avec « up -d --no-deps api ingestor ntp proxy »
   postgres:  { security_opt: ["label=disable"] }
   ingestor:  { security_opt: ["label=disable"] }
   api:       { security_opt: ["label=disable"] }
   proxy:
+    container_name: sentinel-proxy-dev   # contourne un conteneur « sentinel-proxy-1 » fantôme (montage overlay bloqué)
     security_opt: ["label=disable"]
     user: "0:0"
     ports: !override
@@ -16,5 +21,7 @@ services:
       - "0.0.0.0:8080:80"
   ntp:
     security_opt: ["label=disable"]
+    tmpfs: !override
+      - /run/chrony:mode=0777,size=1m   # podman refuse les options uid=/gid= du tmpfs du compose principal
     ports: !override
       - "0.0.0.0:12300:123/udp"
