@@ -50,8 +50,6 @@
 :root[data-ui-theme="industriel"] .topbar { background: #16171a; border-bottom: 0; backdrop-filter: none; }
 :root[data-ui-theme="industriel"] .topbar::after { content: ""; display: block; height: 4px;
   background: repeating-linear-gradient(-45deg, var(--accent) 0 12px, #16171a 12px 24px); }
-:root[data-ui-theme="industriel"] .brand-text strong { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.12em; }
-:root[data-ui-theme="industriel"] .logo { border-radius: 0; background: var(--accent); color: #16171a; box-shadow: none; }
 :root[data-ui-theme="industriel"] .avatar { border-radius: 0; background: #2d3035; color: var(--accent); }
 :root[data-ui-theme="industriel"] .tabs { border-radius: 0; background: none; border: 0; gap: 0; }
 :root[data-ui-theme="industriel"] .tabs button { border-radius: 0; font-family: var(--font-display); font-size: 15px; text-transform: uppercase; letter-spacing: 0.06em;
@@ -78,7 +76,6 @@
 :root[data-ui-theme="industriel"] .holo::before { opacity: 0.15; }
 :root[data-ui-theme="industriel"] th { background: #202226; font-family: var(--font-display); font-size: 13px; }
 :root[data-ui-theme="industriel"] .login-wrapper::before { display: none; }
-:root[data-ui-theme="industriel"] .login-title { background: none; color: var(--accent); font-family: var(--font-display); letter-spacing: 0.14em; }
 :root[data-ui-theme="industriel"] .corp-tag { color: var(--accent); }
 
 /* Fond : trame d'atelier + ligne de balayage (animée par GSAP) */

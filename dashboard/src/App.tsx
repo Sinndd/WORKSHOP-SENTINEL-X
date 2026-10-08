@@ -4,6 +4,7 @@ import AccountView, { PasswordForm, ROLE_LABELS } from "./Account";
 import BadgesView from "./Badges";
 import { getJson, loginApi, OtpRequired, send, Unauthorized, type Session } from "./api";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette";
+import { BrandLogo } from "./components/BrandLogo";
 import { Icon } from "./components/ui";
 import SecurityView from "./Security";
 import Supervision from "./Supervision";
@@ -129,7 +130,7 @@ export default function App() {
         {themeHost}
         <div className="card gate login-card">
           <div className="login-header">
-            <span className="logo big" aria-hidden><Icon name="shield" size={26} /></span>
+            <BrandLogo className="big" />
             <span className="corp-tag">Première connexion</span>
             <h2>Nouveau mot de passe</h2>
             <p className="sub">Le mot de passe temporaire doit être remplacé avant d'accéder au système.</p>
@@ -146,10 +147,7 @@ export default function App() {
       {themeHost}
       <header className="topbar">
         <div className="topbar-inner">
-          <div className="brand">
-            <span className="logo" aria-hidden><Icon name="shield" size={18} /></span>
-            <div className="brand-text"><strong>SENTINEL-X</strong></div>
-          </div>
+          <div className="brand"><BrandLogo /></div>
           {/* Sections en icônes : le libellé n'apparaît que pour la section affichée (info-bulle sur les autres). */}
           <nav className="tabs" aria-label="Sections">
             {tabs.map((t, i) => (
@@ -238,9 +236,9 @@ function LoginGate({ notice, onLogin }: { notice: string | null; onLogin: (s: Se
                    initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}>
         <div className="login-header">
-          <motion.span className="logo big" aria-hidden initial={{ rotate: -12, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }}
-                       transition={{ delay: 0.1, duration: 0.5 }}><Icon name="shield" size={26} /></motion.span>
-          <h1 style={{ margin: 0 }}><span className="login-title">SENTINEL-X</span></h1>
+          <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.5 }}>
+            <h1 style={{ margin: 0 }}><BrandLogo className="big" /></h1>
+          </motion.div>
         </div>
 
         <div>

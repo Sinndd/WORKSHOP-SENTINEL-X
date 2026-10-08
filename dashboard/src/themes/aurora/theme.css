@@ -39,8 +39,6 @@
 :root[data-ui-theme="aurora"] .card h2 { font-weight: 600; letter-spacing: 0.01em; font-size: 14px; }
 :root[data-ui-theme="aurora"] .card h2 .ico, :root[data-ui-theme="aurora"] .tile .label .ico { color: var(--accent); }
 :root[data-ui-theme="aurora"] .tile { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.10); }
-:root[data-ui-theme="aurora"] .brand-text strong { letter-spacing: 0.14em; }
-:root[data-ui-theme="aurora"] .logo { background: linear-gradient(135deg, #f0abfc, #8b6cf0); color: #1a0b2e; box-shadow: 0 0 26px rgba(240, 171, 252, 0.45); }
 :root[data-ui-theme="aurora"] .avatar { background: linear-gradient(135deg, #f0abfc, #8b6cf0); color: #1a0b2e; }
 
 /* Navigation et contrôles en pilules */
@@ -69,4 +67,3 @@
 :root[data-ui-theme="aurora"] .tooltip, :root[data-ui-theme="aurora"] .palette { background: rgba(28, 18, 52, 0.92); border-radius: 16px; backdrop-filter: blur(16px); }
 :root[data-ui-theme="aurora"] .palette li[aria-selected="true"] { background: rgba(139, 108, 240, 0.28); }
 :root[data-ui-theme="aurora"] .login-wrapper::before { background: radial-gradient(circle, rgba(240, 171, 252, 0.18), transparent 65%); }
-:root[data-ui-theme="aurora"] .login-title { background: linear-gradient(90deg, #ffffff, #f0abfc); -webkit-background-clip: text; background-clip: text; }
