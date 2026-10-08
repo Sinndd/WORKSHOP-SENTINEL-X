@@ -1,4 +1,4 @@
-// Signalisation d'alerte du tableau de bord : halo d'écran, bandeau, sirène, titre d'onglet, vibration.
+// Signalisation d'alerte du tableau de bord : halo d'écran, bandeau, son d'alarme, titre d'onglet, vibration.
 // Piloté par le même état que l'hologramme (mesures en direct + alertes reçues depuis moins de 30 s) :
 // tout s'arrête de lui-même quand la situation redevient normale.
 import { useEffect, useRef, useState } from "react";
@@ -7,53 +7,50 @@ import { Icon } from "./ui";
 export type AlarmLevel = "critical" | "warning" | null;
 
 const MUTE_KEY = "sentinel.alarmMuted";
-const SIREN_EVERY_MS = 2_500;
 const BASE_TITLE = typeof document !== "undefined" ? document.title : "SENTINEL-X";
 
 function readMuted(): boolean {
   try { return localStorage.getItem(MUTE_KEY) === "1"; } catch { return false; }
 }
 
-/** Sirène courte à deux tons (Web Audio, aucun fichier son). Le navigateur n'autorise le son qu'après
- *  une interaction sur la page : sinon `blocked` passe à true et le bandeau propose de l'activer. */
+/** Son d'alarme (public/sounds/alarme.mp3) joué en boucle pendant l'alerte critique, arrêté et rembobiné ensuite.
+ *  Le navigateur n'autorise le son qu'après une interaction sur la page : sinon `blocked` passe à true et le
+ *  bandeau propose de l'activer. */
+const ALARM_URL = `${import.meta.env.BASE_URL}sounds/alarme.mp3`;
+const ALARM_VOLUME = 0.7;
+
 function useSiren(active: boolean, muted: boolean) {
-  const ctx = useRef<AudioContext | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
   const [blocked, setBlocked] = useState(false);
 
-  const beep = () => {
-    const ac = (ctx.current ??= new AudioContext());
-    if (ac.state === "suspended") { ac.resume().catch(() => {}); }
-    setBlocked(ac.state !== "running");
-    if (ac.state !== "running") return;
-    const t = ac.currentTime;
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.type = "square";
-    osc.frequency.setValueAtTime(880, t);
-    osc.frequency.setValueAtTime(660, t + 0.22);
-    osc.frequency.setValueAtTime(880, t + 0.44);
-    osc.frequency.setValueAtTime(660, t + 0.66);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.08, t + 0.02);
-    gain.gain.setValueAtTime(0.08, t + 0.84);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
-    osc.connect(gain).connect(ac.destination);
-    osc.start(t);
-    osc.stop(t + 0.92);
+  const element = () => {
+    if (!audio.current) {
+      const a = new Audio(ALARM_URL);
+      a.loop = true;
+      a.preload = "auto";
+      a.volume = ALARM_VOLUME;
+      audio.current = a;
+    }
+    return audio.current;
+  };
+  const play = () => {
+    element().play().then(() => setBlocked(false)).catch(() => setBlocked(true));
   };
 
   useEffect(() => {
     if (!active || muted) return;
-    beep();
+    play();
     navigator.vibrate?.([300, 150, 300]);
-    const id = setInterval(beep, SIREN_EVERY_MS);
-    return () => clearInterval(id);
+    return () => {
+      const a = audio.current;
+      if (a) { a.pause(); a.currentTime = 0; }
+    };
   }, [active, muted]);
 
-  useEffect(() => () => { ctx.current?.close().catch(() => {}); }, []);
+  useEffect(() => () => { audio.current?.pause(); audio.current = null; }, []);
 
-  /** Appelé depuis un clic : débloque le son du navigateur et rejoue la sirène. */
-  const unlock = () => { setBlocked(false); beep(); };
+  /** Appelé depuis un clic : débloque le son du navigateur et lance l'alarme. */
+  const unlock = () => play();
   return { blocked: blocked && active && !muted, unlock };
 }
 
