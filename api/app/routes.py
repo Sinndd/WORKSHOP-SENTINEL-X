@@ -22,6 +22,7 @@ from .auth import client_ip, rate_limited, require_device_or_operator, require_o
 # Tampon mémoire RAM pour le dernier snapshot webcam (aucun impact I/O sur carte SD)
 _latest_snapshot: bytes | None = None
 _latest_snapshot_ts: datetime | None = None
+_unknown_now = 0                       # nombre d'inconnus confirmés, annoncé par le script de vision avec chaque image
 
 # Relais vidéo : chaque image reçue est diffusée en direct aux flux MJPEG ouverts (GET /vision/stream).
 # Une file d'une ou deux images par spectateur : un client lent perd des images au lieu de retarder les autres.
@@ -386,7 +387,7 @@ def emergency_stop():
 @router.post("/vision/snapshot", status_code=200, tags=["vision IA"], dependencies=operator)
 async def upload_snapshot(request: Request):
     """Reçoit la dernière image JPEG traitée par le script IA webcam et la garde en mémoire."""
-    global _latest_snapshot, _latest_snapshot_ts, _last_frame_seq
+    global _latest_snapshot, _latest_snapshot_ts, _last_frame_seq, _unknown_now
     body = await request.body()          # taille déjà plafonnée par le middleware (413)
     if len(body) > MAX_SNAPSHOT_BYTES or not body.startswith(b"\xff\xd8\xff"):
         raise HTTPException(415, "image JPEG de 2 Mio maximum attendue")
@@ -399,6 +400,8 @@ async def upload_snapshot(request: Request):
         _last_frame_seq = int(seq)
     _latest_snapshot = body
     _latest_snapshot_ts = datetime.now(timezone.utc)
+    unknown = request.headers.get("x-vision-unknown", "")
+    _unknown_now = min(int(unknown), 99) if unknown.isdigit() else 0
     _publish_frame(body)
     return {"status": "ok", "bytes": len(_latest_snapshot), "ts": _latest_snapshot_ts.isoformat()}
 
@@ -429,6 +432,14 @@ async def stream_video(request: Request):
 
     return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.get("/vision/status", tags=["vision IA"], dependencies=viewer)
+def vision_status():
+    """État en direct de la caméra IA : `unknown` = personnes inconnues confirmées sur la dernière image (0 si le flux est coupé)."""
+    age = None if _latest_snapshot_ts is None else (datetime.now(timezone.utc) - _latest_snapshot_ts).total_seconds()
+    live = age is not None and age < 4
+    return {"live": live, "unknown": _unknown_now if live else 0, "age_s": None if age is None else round(age, 1)}
 
 
 @router.get("/vision/snapshot", tags=["vision IA"], dependencies=viewer)

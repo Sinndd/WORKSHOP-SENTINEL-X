@@ -31,6 +31,7 @@ const PATHS: Record<string, string> = {
   pulse: "M1.5 8h3l1.5-4 3 8 1.5-4h4",
   gauge: "M2.5 11a5.5 5.5 0 1 1 11 0M8 11l3-3.5",
   chart: "M2 13.5h12M3.5 11l3-4 2.5 2 4-5.5",
+  fullscreen: "M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10",
   expand: "M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9",
   shrink: "M9 2.5V7h4.5M7 13.5V9H2.5M9 7l4.5-4.5M7 9l-4.5 4.5",
   search: "M7 12.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11zM11 11l3.5 3.5",

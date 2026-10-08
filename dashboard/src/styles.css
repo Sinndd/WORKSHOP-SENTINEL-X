@@ -375,6 +375,16 @@ td.num, th.num { text-align: right; }
 .cam-toggle { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%; display: inline-grid; place-items: center; cursor: pointer;
   color: #fff; background: rgba(255, 255, 255, 0.14); border: 0; backdrop-filter: blur(10px); }
 .cam-toggle:hover { background: rgba(255, 255, 255, 0.24); }
+.cam-toggle.cam-full { right: 44px; }
+/* Inconnu détecté : cadre rouge pulsant + étiquette (visibles aussi en plein écran, l'alarme générale ne l'étant pas) */
+.cam-pip.cam-alert { box-shadow: 0 0 0 3px var(--critical), 0 0 28px 6px color-mix(in srgb, var(--critical) 55%, transparent); animation: cam-alert-pulse 1s ease-in-out infinite; }
+@keyframes cam-alert-pulse { 0%, 100% { box-shadow: 0 0 0 3px var(--critical), 0 0 10px 2px color-mix(in srgb, var(--critical) 35%, transparent); } 50% { box-shadow: 0 0 0 4px var(--critical), 0 0 34px 10px color-mix(in srgb, var(--critical) 70%, transparent); } }
+.cam-unknown { position: absolute; left: 10px; bottom: 10px; z-index: 1; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 980px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: #fff; background: var(--critical); }
+.cam-pip:fullscreen { width: 100vw; height: 100vh; max-width: none; aspect-ratio: auto; border-radius: 0; background: #000; }
+.cam-pip:fullscreen canvas { object-fit: contain; }
+.cam-pip:fullscreen .cam-unknown { font-size: 18px; padding: 8px 18px; left: 18px; bottom: 18px; }
+@media (prefers-reduced-motion: reduce) { .cam-pip.cam-alert { animation: none; } }
 @media (max-width: 720px) { .cam-pip { width: 42%; } .cam-pip.expanded { left: 16px; width: auto; } }
 
 /* Boutons d'aperçu des états */

@@ -343,3 +343,14 @@ class Faces(unittest.TestCase):
         r = self.client.post("/api/v1/faces/enrollments/photo?name=x&consent=true", headers={**self.op, "Content-Length": "3000000"},
                              content=b"\xff\xd8\xff" + b"0" * 10)
         self.assertIn(r.status_code, (400, 403, 413))
+
+
+class VisionStatus(unittest.TestCase):
+    def test_unknown_count_announced_by_vision_script(self):
+        client, op = TestClient(app), {"Authorization": "Bearer op"}
+        self.assertEqual(client.get("/api/v1/vision/status").status_code, 401)
+        jpeg = b"\xff\xd8\xff\xe0x"
+        client.post("/api/v1/vision/snapshot", content=jpeg, headers={**op, "X-Vision-Unknown": "2"})
+        self.assertEqual(client.get("/api/v1/vision/status", headers=op).json()["unknown"], 2)
+        client.post("/api/v1/vision/snapshot", content=jpeg, headers={**op, "X-Vision-Unknown": "abc"})   # valeur invalide : 0
+        self.assertEqual(client.get("/api/v1/vision/status", headers=op).json()["unknown"], 0)

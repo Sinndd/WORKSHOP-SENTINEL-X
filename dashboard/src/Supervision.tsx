@@ -7,7 +7,7 @@ import { AlarmLayer, type AlarmLevel, type AlarmReason } from "./components/Alar
 import { LineChart, type Point } from "./components/LineChart";
 import { QuickEnroll } from "./Badges";
 import { RobotControl } from "./Robot";
-import { useLiveVideo } from "./hooks";
+import { useLiveVideo, usePolling } from "./hooks";
 import { Card, Icon, StatTile, StatusBadge, type Status } from "./components/ui";
 import { ago, dateTime, num } from "./format";
 import type { AccessEvent, Aggregate, Alert, CommandLog, Device, Severity, Telemetry } from "./types";
@@ -32,6 +32,7 @@ const TEMP_HIGH = 40;
 // Une alerte colore l'hologramme pendant 30 s après sa réception, puis il revient à l'état réel des capteurs.
 // Les alertes non acquittées restent signalées dans le journal.
 const RECENT_ALERT_MS = 30_000;
+const UNKNOWN_HOLD_MS = 15_000;
 
 const EVENT_LABELS: Record<string, string> = {
   INTRUSION_DETECTED: "Intrusion",
@@ -245,18 +246,35 @@ function feedItems(data: Data): FeedItem[] {
 
 /** Incrustation caméra (coin de l'hologramme) : « Live » si le script IA envoie des images récentes, sinon « Offline ».
  *  L'image est chargée en blob car le jeton ne peut pas passer par un simple <img src>. */
-function CameraInset({ token, expanded, onToggle }: { token: string; expanded: boolean; onToggle: () => void }) {
+function CameraInset({ token, expanded, onToggle, unknown }: { token: string; expanded: boolean; onToggle: () => void; unknown: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [full, setFull] = useState(false);
   const { live, fps } = useLiveVideo(token, canvasRef);
+  // Plein écran réel du navigateur (Échap pour quitter) ; l'état suit aussi une sortie faite au clavier.
+  useEffect(() => {
+    const sync = () => setFull(document.fullscreenElement === boxRef.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void boxRef.current?.requestFullscreen?.().catch(() => undefined);
+  };
   return (
     // Animation de mise en page (Motion) : la fenêtre grandit depuis son coin. À l'agrandissement elle part
     // avec un léger retard pour que Wall-E prenne de l'avance ; à la réduction elle se rétracte d'abord.
     <motion.div layout transition={{ layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: expanded ? 0.12 : 0 } }}
-         className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}`}
-         aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={onToggle}>
+         ref={boxRef} className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}${unknown > 0 ? " cam-alert" : ""}`}
+         aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={toggleFull}>
       <motion.canvas layout ref={canvasRef} aria-label="Image en direct de la caméra IA" style={{ display: live ? "block" : "none" }} />
       {!live && <motion.span layout="position" className="cam-icon"><Icon name="cam" size={expanded ? 34 : 22} /></motion.span>}
       <motion.span layout="position" className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? `Live · ${fps} fps` : "Offline"}</motion.span>
+      {unknown > 0 && <span className="cam-unknown" role="alert"><Icon name="bell" size={14} />{unknown > 1 ? `${unknown} INCONNUS` : "PERSONNE INCONNUE"}</span>}
+      <button type="button" className="cam-toggle cam-full" onClick={toggleFull} aria-pressed={full}
+              title={full ? "Quitter le plein écran" : "Plein écran"} aria-label={full ? "Quitter le plein écran" : "Caméra en plein écran"}>
+        <Icon name={full ? "shrink" : "fullscreen"} size={14} />
+      </button>
       <motion.button layout="position" type="button" className="cam-toggle" onClick={onToggle} aria-pressed={expanded}
               title={expanded ? "Réduire la caméra" : "Agrandir la caméra"} aria-label={expanded ? "Réduire la caméra" : "Agrandir la caméra"}>
         <Icon name={expanded ? "shrink" : "expand"} size={14} />
@@ -336,6 +354,23 @@ function Dashboard({
   const shownAlerts = (unackOnly ? unack : alerts).slice(0, 100);
   const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT, height: 170 };
   const [camExpanded, setCamExpanded] = useState(false);
+  // Inconnus confirmés par la caméra IA, en direct (l'API ne répond non nul que si le flux est vivant).
+  const [unknownNow, setUnknownNow] = useState(0);
+  const [unknownSeen, setUnknownSeen] = useState<{ n: number; at: number } | null>(null);
+  const pollVision = useCallback(() => {
+    getJson<{ unknown: number }>("/api/v1/vision/status", token).then(
+      (v) => { setUnknownNow(v.unknown); if (v.unknown > 0) setUnknownSeen({ n: v.unknown, at: Date.now() }); },
+      () => setUnknownNow(0));
+  }, [token]);
+  usePolling(pollVision, 1000);
+  // L'état critique tient 15 s après le dernier inconnu vu (il a pu passer rapidement) ; le cadre de la caméra, lui, suit le direct.
+  const [, setHoldTick] = useState(0);
+  useEffect(() => {          // rend la main à l'expiration du maintien, même si rien d'autre ne change à l'écran
+    if (!unknownSeen) return;
+    const id = setTimeout(() => setHoldTick((t) => t + 1), UNKNOWN_HOLD_MS + 100);
+    return () => clearTimeout(id);
+  }, [unknownSeen]);
+  const unknownHold = unknownSeen !== null && Date.now() - unknownSeen.at < UNKNOWN_HOLD_MS;
   const [preview, setPreview] = useState<HoloMode | null>(null);
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
 
@@ -346,7 +381,7 @@ function Dashboard({
   const recentAlerts = (sev: Severity) => alerts.filter((a) => a.severity === sev && !a.acknowledged
     && now - Date.parse(a.received_at) < RECENT_ALERT_MS);
   const recentAlert = (sev: Severity) => recentAlerts(sev).length > 0;
-  const liveMode: HoloMode = !online ? "offline"
+  const liveMode: HoloMode = unknownHold ? "critical" : !online ? "offline"
     : gasHigh || tempHigh || recentAlert("CRITICAL") ? "critical"
     : presence || recentAlert("WARNING") ? "warning" : "nominal";
   // Aperçu : simulation locale d'un état (rien n'est envoyé à l'ESP ni enregistré), pour démonstration.
@@ -360,6 +395,7 @@ function Dashboard({
     : [
     ...(alarmLevel === "critical" && gasHigh ? [{ key: "gas", label: `Gaz élevé : ${num(latest?.gas_raw_ppm, 0)}`, detail: `seuil ${GAS_HIGH}` }] : []),
     ...(alarmLevel === "critical" && tempHigh ? [{ key: "temp", label: `Température élevée : ${num(latest?.temperature_celsius)} °C`, detail: `seuil ${TEMP_HIGH} °C` }] : []),
+    ...(alarmLevel === "critical" && unknownHold && unknownSeen ? [{ key: "unknown", label: unknownSeen.n > 1 ? `${unknownSeen.n} personnes inconnues devant la caméra` : "Personne inconnue devant la caméra", detail: unknownNow > 0 ? "en ce moment" : "à l'instant" }] : []),
     ...(alarmLevel === "warning" && presence ? [{ key: "pir", label: "Présence détectée", detail: "capteur PIR" }] : []),
     ...alarmAlerts.map((a) => ({ key: `a${a.id}`, label: `${EVENT_LABELS[a.event_type] ?? a.event_type}${a.details ? ` — ${a.details}` : ""}`,
       detail: `${a.source_sensor ?? a.channel}, ${ago(a.received_at, now)}` })),
@@ -409,7 +445,7 @@ function Dashboard({
                             sasOpen={Boolean(online && latest?.airlock_open)} />
                 </Suspense>
               </div>
-              <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} />
+              <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} unknown={unknownNow} />
             </div>
           </Card>
         </div>

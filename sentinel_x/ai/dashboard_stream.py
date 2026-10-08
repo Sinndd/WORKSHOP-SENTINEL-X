@@ -300,7 +300,7 @@ class Sender:
 
     def __init__(self, url: str, token: str, verify: str | bool, workers: int = 3) -> None:
         self.url, self.verify = url, verify
-        self.q: queue.Queue[tuple[int, bytes]] = queue.Queue(maxsize=workers)
+        self.q: queue.Queue[tuple[int, bytes, int]] = queue.Queue(maxsize=workers)
         self.seq = 0
         self.sent = 0
         self.sent_fps = 0.0
@@ -314,10 +314,10 @@ class Sender:
             w.start()
         threading.Thread(target=self._stats, name="envoi-stats", daemon=True).start()
 
-    def push(self, jpeg: bytes) -> None:
+    def push(self, jpeg: bytes, unknown: int = 0) -> None:
         with self._lock:
             self.seq = max(self.seq + 1, time.time_ns() // 1000)    # horloge en microsecondes : ne revient jamais en arrière, même après un redémarrage
-            item = (self.seq, jpeg)
+            item = (self.seq, jpeg, unknown)
         while True:
             try:
                 self.q.put_nowait(item)
@@ -339,9 +339,9 @@ class Sender:
         session = requests.Session()
         session.headers.update({"Authorization": f"Bearer {self._token}", "Content-Type": "image/jpeg"})
         while True:
-            seq, jpeg = self.q.get()
+            seq, jpeg, unknown = self.q.get()
             try:
-                r = session.post(self.url, data=jpeg, headers={"X-Frame-Seq": str(seq)}, timeout=3, verify=self.verify)
+                r = session.post(self.url, data=jpeg, headers={"X-Frame-Seq": str(seq), "X-Vision-Unknown": str(unknown)}, timeout=3, verify=self.verify)
                 if r.status_code != 200:
                     raise RuntimeError(f"HTTP {r.status_code}")
                 self.sent += 1
@@ -378,8 +378,15 @@ def main() -> int:
     if not args.no_ai:
         ai = AiWorker(camera, args.ai_fps)
         ai.start()
+    faces = None
     if ai is not None:
-        FaceSync(ai, camera, args.api, args.token, args.cafile or True).start()
+        faces = FaceSync(ai, camera, args.api, args.token, args.cafile or True)
+        faces.start()
+    unknown = None
+    if ai is not None:
+        from sentinel_x.ai.unknown_alert import UnknownAlert
+        unknown = UnknownAlert.from_env(args.api, args.token, args.cafile or True)
+        log(f"alerte inconnu : alarme {'oui' if unknown.alarm else 'non'}, Discord {'oui' if unknown.webhook else 'non (DISCORD_WEBHOOK_URL absente)'}")
     sender = Sender(args.api.rstrip("/") + "/api/v1/vision/snapshot", args.token, args.cafile or True)
     sender.start()
     from sentinel_x.ai.overlay import draw_hud, draw_persons
@@ -399,9 +406,12 @@ def main() -> int:
                 continue
             last_sent = now
             display = frame.copy()                                   # l'IA lit `frame` en même temps : ne jamais dessiner dessus
-            people = 0
+            people, unknown_n = 0, 0
             if ai is not None and ai.result is not None and now - ai.result_at < 1.5:
                 people = draw_persons(display, ai.result)
+                if unknown is not None and faces is not None and faces.version is not None:   # pas d'alerte avant le chargement des visages
+                    unknown_n = UnknownAlert.unknown_count(ai.result)       # annoncé à l'API : le tableau de bord passe au rouge
+                    unknown.update(ai.result, lambda: cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 80])[1].tobytes())
             if not args.no_hud:
                 bits = [f"cam {camera.read_fps:.0f} fps", f"envoi {sender.sent_fps:.0f} fps"]
                 if ai is not None:
@@ -409,7 +419,7 @@ def main() -> int:
                 draw_hud(display, bits)
             ok, buf = cv2.imencode(".jpg", display, encode_params)
             if ok:
-                sender.push(buf.tobytes())
+                sender.push(buf.tobytes(), unknown_n)
             if now - last_report >= 5:
                 last_report = now
                 log(f"caméra {camera.read_fps:.1f} fps | envoyées {sender.sent_fps:.1f} fps | "
