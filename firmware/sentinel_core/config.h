@@ -67,7 +67,8 @@
 #define HEAD_RANGE_DEG    90        // la tête tourne de -90 à +90 degrés autour de sa position de démarrage
 #define HEAD_STEPS_PER_DEG 11.378f  // 28BYJ-48 en demi-pas : 4096 par tour
 #define HEAD_STEP_US      2000      // délai entre deux demi-pas
-struct ServoCtl { uint8_t pin; float cur, target; int minD, maxD; };   // ici : l'IDE génère les prototypes avant le code
+#define SERVO_RELEASE_MS  1200      // signal coupé 1,2 s après l'arrivée : plus de tremblement ni d'échauffement (0 = le servo garde la position)
+struct ServoCtl { uint8_t pin; float cur, target; int minD, maxD; unsigned long idleSince = 0; bool released = false; };   // ici : l'IDE génère les prototypes avant le code
 #define TRAP_HOLD_MS      5000      // trappe ouverte après un badge accepté, puis refermée
 #define TRAP_REMOTE_HOLD_MS 30000   // ouverture ordonnée par le serveur sans durée : refermée au bout de ce délai
 

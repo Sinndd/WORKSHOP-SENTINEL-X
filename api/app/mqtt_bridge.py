@@ -45,6 +45,8 @@ class MqttBridge:
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="access")
+        self.actuators: dict = {}      # dernières positions reçues dans la télémétrie (bras, tête, trappe)
+        self.actuators_at: float | None = None
 
     # --- Cycle de vie ---------------------------------------------------------------
     def start(self):
@@ -69,16 +71,31 @@ class MqttBridge:
         log.info("connecté à mqtts://%s:%d", config.MQTT_HOST, config.MQTT_PORT)
         client.subscribe(config.TOPIC_ACCESS, qos=1)
         client.subscribe(config.TOPIC_ENROLL, qos=1)
+        client.subscribe(config.TOPIC_TELEMETRY, qos=0)
 
     def _on_disconnect(self, _client, _userdata, _flags, reason_code, _props):
         log.warning("déconnecté du broker (%s), reconnexion automatique", reason_code)
 
     def _on_message(self, _client, _userdata, msg):
         received_at = datetime.now(timezone.utc)
-        if msg.topic == config.TOPIC_ENROLL:
+        if msg.topic == config.TOPIC_TELEMETRY:
+            self._remember_actuators(msg.payload, received_at)
+        elif msg.topic == config.TOPIC_ENROLL:
             self.worker.submit(self._safe_handle_enroll, msg.payload)
         else:
             self.worker.submit(self._safe_handle_access, msg.payload, received_at)
+
+    def _remember_actuators(self, payload: bytes, received_at: datetime):
+        """Garde en mémoire les positions des actionneurs pour GET /actuators/state (le tableau de bord s'y recale)."""
+        try:
+            state = json.loads(payload).get("actuators_state") or {}
+        except (ValueError, AttributeError):
+            return
+        keys = ("arm_left_deg", "arm_right_deg", "head_deg", "trap_pos_percent")
+        found = {k: state[k] for k in keys if isinstance(state.get(k), (int, float)) and not isinstance(state.get(k), bool)}
+        if found:
+            self.actuators = found
+            self.actuators_at = received_at.timestamp()
 
     # --- Publication --------------------------------------------------------------------
     def publish(self, topic: str, payload: dict, action: str | None) -> int:

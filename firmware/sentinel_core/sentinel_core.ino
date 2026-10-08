@@ -124,13 +124,18 @@ void servoPwm(const ServoCtl& s) {
   uint32_t us = 500 + (uint32_t)(s.cur * 2000.0f / 180.0f + 0.5f);   // 500..2500 us
   ledcWrite(s.pin, (uint32_t)((uint64_t)us * 65535 / 20000));
 }
-void servoSet(ServoCtl& s, float deg) { s.target = constrain(deg, (float)s.minD, (float)s.maxD); }
-void servoFreeze(ServoCtl& s) { s.target = s.cur; }
+void servoSet(ServoCtl& s, float deg) { s.target = constrain(deg, (float)s.minD, (float)s.maxD); s.released = false; }
+void servoFreeze(ServoCtl& s) { s.target = s.cur; s.idleSince = millis(); }
 bool servoArrived(const ServoCtl& s) { return fabsf(s.target - s.cur) < 0.5f; }
 void servoInit(ServoCtl& s) { ledcAttach(s.pin, 50, 16); servoPwm(s); }
 void servoStepOne(ServoCtl& s, float maxStep) {
   float d = s.target - s.cur;
-  if (fabsf(d) < 0.01f) return;
+  if (fabsf(d) < 0.01f) {
+    // arrivé : au bout de SERVO_RELEASE_MS on coupe le signal (un servo qui « tient » tremble au moindre bruit d'alimentation)
+    if (SERVO_RELEASE_MS && !s.released && millis() - s.idleSince >= SERVO_RELEASE_MS) { ledcWrite(s.pin, 0); s.released = true; }
+    return;
+  }
+  s.idleSince = millis();
   s.cur += (fabsf(d) <= maxStep) ? d : (d > 0 ? maxStep : -maxStep);
   servoPwm(s);
 }
@@ -174,7 +179,9 @@ bool headMoving = false;
 bool mcpWrite(uint8_t reg, uint8_t v) { Wire.beginTransmission(MCP_ADDR); Wire.write(reg); Wire.write(v); return Wire.endTransmission() == 0; }
 void headInit() {
   Wire.beginTransmission(MCP_ADDR);
-  mcpOk = (Wire.endTransmission() == 0);
+  uint8_t i2cErr = Wire.endTransmission();
+  mcpOk = (i2cErr == 0);
+  if (!mcpOk) Serial.printf("[DBG] I2C erreur %u, SDA=%d SCL=%d, millis=%lu\n", i2cErr, digitalRead(PIN_I2C_SDA), digitalRead(PIN_I2C_SCL), millis());
   if (mcpOk) mcpOk = mcpWrite(MCP_IODIRA, 0x00) && mcpWrite(MCP_IODIRB, 0x00) && mcpWrite(MCP_OLATA, 0x00) && mcpWrite(MCP_OLATB, 0x00);
   Serial.printf("[HEAD] MCP23017 0x%02X : %s\n", MCP_ADDR, mcpOk ? "OK" : "ABSENT (tete desactivee)");
 }
@@ -817,6 +824,42 @@ void updateDisplay() {
   display.display();
 }
 
+#if defined(ESP32)
+// Lecture de la version du RC522 (0x00/0xFF : aucun lecteur sur le bus). Appelée au démarrage puis réessayée tant qu'il est absent.
+void rfidProbe() {
+  pinMode(PIN_RFID_RST, OUTPUT); digitalWrite(PIN_RFID_RST, LOW); delay(50); digitalWrite(PIN_RFID_RST, HIGH); delay(50);   // reset matériel : le RC522 reste figé si l'ESP32 redémarre en pleine transaction
+  rfid.PCD_Init();
+  delay(50);   // laisse la puce finir sa réinitialisation : lue trop tôt, la version vaut 0x00
+  byte v = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+  bool ok = (v != 0x00 && v != 0xFF);
+  if (!ok) Serial.printf("[DBG] RC522 v=0x%02X MISO=%d SS=%d RST=%d millis=%lu\n", v, digitalRead(PIN_RFID_MISO), digitalRead(PIN_RFID_SS), digitalRead(PIN_RFID_RST), millis());
+  static int tries = 0;
+  if (ok != rfidOk || tries++ < 5) Serial.printf("[RFID] RC522 version 0x%02X : %s\n", v, ok ? "OK" : "ABSENT (verifier le cablage)");
+  rfidOk = ok;
+}
+// Périphériques absents au démarrage (alimentation instable, fil mal serré) : on réessaie toutes les 5 s sans redémarrer.
+void retryHardware() {
+  static unsigned long last = 0;
+  if ((rfidOk && mcpOk) || millis() - last < 5000 || enrollMode) return;
+  last = millis();
+  if (!rfidOk) rfidProbe();
+  if (!mcpOk && headTarget == headPos) headInit();
+}
+#endif
+
+#if defined(ESP32)
+// Si l'ESP32 redémarre en plein transfert I2C (mise à jour, coupure), un périphérique peut garder SDA à 0 et ne plus répondre
+// (MCP23017 « absent »). 9 impulsions sur SCL le font terminer son octet, puis une condition STOP libère le bus.
+void i2cBusRecover() {
+  pinMode(PIN_I2C_SDA, INPUT_PULLUP); pinMode(PIN_I2C_SCL, OUTPUT_OPEN_DRAIN); digitalWrite(PIN_I2C_SCL, HIGH);
+  for (int i = 0; i < 9 && digitalRead(PIN_I2C_SDA) == LOW; i++) {
+    digitalWrite(PIN_I2C_SCL, LOW); delayMicroseconds(5); digitalWrite(PIN_I2C_SCL, HIGH); delayMicroseconds(5);
+  }
+  pinMode(PIN_I2C_SDA, OUTPUT_OPEN_DRAIN); digitalWrite(PIN_I2C_SDA, LOW); delayMicroseconds(5);   // STOP : SDA monte pendant que SCL est haut
+  digitalWrite(PIN_I2C_SCL, HIGH); delayMicroseconds(5); digitalWrite(PIN_I2C_SDA, HIGH); delayMicroseconds(5);
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -836,6 +879,9 @@ void setup() {
   setRGB(false, false, false);
   digitalWrite(PIN_BUZZER, LOW);
 
+#if defined(ESP32)
+  i2cBusRecover();
+#endif
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
 #if defined(ESP32)
   Wire.setClock(400000);   // 400 kHz : une image OLED en ~25 ms au lieu de ~100 ms (animations fluides)
@@ -853,15 +899,16 @@ void setup() {
 
 #if defined(ESP32)
   uiBoot("Capteurs...", 35);
-  servoInit(armL); servoInit(armR); servoInit(trapServo); headInit();
   pinMode(PIN_BOOT, INPUT_PULLUP);
   if (!parseMasterKey()) Serial.println(F("[RFID] ERREUR : CARD_MASTER_KEY invalide (32 caracteres hexadecimaux attendus dans secrets.h)"));
   SPI.begin(PIN_RFID_SCK, PIN_RFID_MISO, PIN_RFID_MOSI, PIN_RFID_SS);
-  rfid.PCD_Init();
-  delay(50);   // laisse la puce finir sa réinitialisation : lue trop tôt, la version vaut 0x00
-  byte rfidVersion = rfid.PCD_ReadRegister(MFRC522::VersionReg);
-  rfidOk = (rfidVersion != 0x00 && rfidVersion != 0xFF);   // 0x00/0xFF : aucun lecteur sur le bus
-  Serial.printf("[RFID] RC522 version 0x%02X : %s\n", rfidVersion, rfidOk ? "OK" : "ABSENT (verifier le cablage)");
+  for (int i = 0; i < 4 && !rfidOk; i++) { rfidProbe(); if (!rfidOk) delay(150); }   // le RC522 peut mettre du temps à se stabiliser à la mise sous tension
+  for (int i = 0; i < 3 && !mcpOk; i++) { headInit(); if (!mcpOk) delay(150); }
+  // Les servos démarrent en dernier et un par un : trois servos qui rejoignent leur position ensemble tirent plusieurs ampères
+  // et font chuter le 3,3 V (RC522 et MCP23017 alors lus comme absents).
+  servoInit(armL);  delay(350);
+  servoInit(armR);  delay(350);
+  servoInit(trapServo); delay(350);
 #endif
 
 #if defined(ESP32)
@@ -914,6 +961,7 @@ void loop() {
   pollRfid();
   flushEnrollOutbox();
   updateTrap();
+  retryHardware();
 #endif
 
   // Animation physique immédiate de l'alarme (Buzzer + LED Rouge clignotante)

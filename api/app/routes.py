@@ -1,6 +1,7 @@
 """Endpoints REST /api/v1 (contrat : docs/CONTRAT-MQTT.md, détail : docs/API.md, interactif : /docs)."""
 import asyncio
 import math
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -330,6 +331,14 @@ def control_airlock(action: AirlockAction):
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from None
     return {"id": cmd_id, "status": "sent", "command": cmd}
+
+
+@router.get("/actuators/state", tags=["actionneurs"], dependencies=viewer)
+def actuators_state():
+    """Dernières positions rapportées par l'ESP32 (bras, tête en degrés ; trappe en %). `age_s` = ancienneté de la mesure."""
+    at = bridge.actuators_at
+    return {**{k: bridge.actuators.get(k) for k in ("arm_left_deg", "arm_right_deg", "head_deg", "trap_pos_percent")},
+            "age_s": None if at is None else round(time.time() - at, 1)}
 
 
 @router.post("/actuators/move", status_code=202, tags=["actionneurs"], dependencies=operator)
