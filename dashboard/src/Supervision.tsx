@@ -1,11 +1,13 @@
 import { motion } from "motion/react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { download, fetchSnapshot, getJson, postJson, Unauthorized } from "./api";
+import { download, getJson, postJson, Unauthorized } from "./api";
 import type { PaletteCommand } from "./components/CommandPalette";
 import type { HoloMode } from "./components/Hologram";
 import { AlarmLayer, type AlarmLevel, type AlarmReason } from "./components/AlarmLayer";
 import { LineChart, type Point } from "./components/LineChart";
 import { QuickEnroll } from "./Badges";
+import { RobotControl } from "./Robot";
+import { useLiveVideo } from "./hooks";
 import { Card, Icon, StatTile, StatusBadge, type Status } from "./components/ui";
 import { ago, dateTime, num } from "./format";
 import type { AccessEvent, Aggregate, Alert, CommandLog, Device, Severity, Telemetry } from "./types";
@@ -240,35 +242,21 @@ function feedItems(data: Data): FeedItem[] {
   return items.sort((x, y) => Date.parse(y.ts) - Date.parse(x.ts));
 }
 
-const CAMERA_POLL_MS = 2_000;
-const CAMERA_MAX_AGE_MS = 15_000;   // au-delà, la dernière image est considérée comme figée : caméra hors ligne
 
 /** Incrustation caméra (coin de l'hologramme) : « Live » si le script IA envoie des images récentes, sinon « Offline ».
  *  L'image est chargée en blob car le jeton ne peut pas passer par un simple <img src>. */
 function CameraInset({ token, expanded, onToggle }: { token: string; expanded: boolean; onToggle: () => void }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [live, setLive] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    const poll = () => fetchSnapshot("/api/v1/vision/snapshot", token, CAMERA_MAX_AGE_MS)
-      .then((r) => {
-        if (cancelled) { if (r.url) URL.revokeObjectURL(r.url); return; }
-        setLive(r.live);
-        setSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return r.url; });
-      })
-      .catch(() => { if (!cancelled) { setLive(false); setSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return null; }); } });
-    poll();
-    const id = setInterval(poll, CAMERA_POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [token]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { live, fps } = useLiveVideo(token, canvasRef);
   return (
     // Animation de mise en page (Motion) : la fenêtre grandit depuis son coin. À l'agrandissement elle part
     // avec un léger retard pour que Wall-E prenne de l'avance ; à la réduction elle se rétracte d'abord.
     <motion.div layout transition={{ layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: expanded ? 0.12 : 0 } }}
          className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}`}
          aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={onToggle}>
-      {live && src ? <motion.img layout src={src} alt="Image en direct de la caméra IA" /> : <motion.span layout="position" className="cam-icon"><Icon name="cam" size={expanded ? 34 : 22} /></motion.span>}
-      <motion.span layout="position" className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? "Live" : "Offline"}</motion.span>
+      <motion.canvas layout ref={canvasRef} aria-label="Image en direct de la caméra IA" style={{ display: live ? "block" : "none" }} />
+      {!live && <motion.span layout="position" className="cam-icon"><Icon name="cam" size={expanded ? 34 : 22} /></motion.span>}
+      <motion.span layout="position" className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? `Live · ${fps} fps` : "Offline"}</motion.span>
       <motion.button layout="position" type="button" className="cam-toggle" onClick={onToggle} aria-pressed={expanded}
               title={expanded ? "Réduire la caméra" : "Agrandir la caméra"} aria-label={expanded ? "Réduire la caméra" : "Agrandir la caméra"}>
         <Icon name={expanded ? "shrink" : "expand"} size={14} />
@@ -469,6 +457,8 @@ function Dashboard({
             <EmergencyButton onConfirm={onEmergencyStop} disabled={!canOperate} />
           </fieldset>
         </Card>
+
+        <RobotControl token={token} onExpired={onExpired} canOperate={canOperate} />
 
         {canOperate && <QuickEnroll token={token} onExpired={onExpired} />}
 

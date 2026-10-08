@@ -9,7 +9,7 @@
 // =========================================================
 #include "secrets.h"
 
-#define SERVER_HOST       "10.69.127.115"
+#define SERVER_HOST       "192.168.50.1"
 #define HTTP_PORT         8000
 #define MQTT_PORT         8883            // MQTTS chiffré TLS selon CONTRAT-MQTT § 1
 #define MQTT_USER         "esp32"
@@ -50,13 +50,24 @@
 #define PIN_RFID_MISO     19  // D19
 #define PIN_RFID_MOSI     23  // D23
 
-// Moteur de la trappe : 28BYJ-48 + ULN2003 (demi-pas). Les 4 fils IN1..IN4 dans cet ordre.
-#define PIN_MOTOR_IN1     32  // D32
-#define PIN_MOTOR_IN2     15  // D15
-#define PIN_MOTOR_IN3     2   // D2
-#define PIN_MOTOR_IN4     12  // D12
-#define TRAP_STEPS        1024      // demi-pas pour ouvrir la trappe (4096 = 1 tour ; 1024 ~ 90 degres) : à ajuster
-#define TRAP_STEP_US      3000      // délai entre deux demi-pas (3 ms : fiable pour un 28BYJ-48)
+// Actionneurs : câblage dans docs/CABLAGE-COMPLET.md
+//  - tête : 28BYJ-48 + ULN2003 piloté par le MCP23017 (I2C), IN1..IN4 = GPA0..GPA3
+//  - bras gauche, bras droit, trappe arrière : micro-servos 9 g (PWM 50 Hz), alimentés en 5 V externe
+#define MCP_ADDR          0x20      // A0 A1 A2 à la masse
+#define PIN_SERVO_ARM_L   32        // D32
+#define PIN_SERVO_ARM_R   15        // D15
+#define PIN_SERVO_TRAP    2         // D2
+#define SERVO_SPEED_DPS   150       // vitesse maximale des servos (degrés/s) : le déplacement est lissé, jamais brusque
+#define ARM_MIN_DEG       30        // butées logicielles des bras : à ajuster selon la mécanique (0..180)
+#define ARM_MAX_DEG       150
+#define ARM_REST_DEG      90        // position au démarrage / commande CENTER
+#define TRAP_CLOSED_DEG   60        // angle du servo, trappe fermée : à ajuster (le sens peut être inversé)
+#define TRAP_OPEN_DEG     120       // angle du servo, trappe ouverte
+#define TRAP_STEPS        1000      // unité de progression de la trappe (0 = fermée, 1000 = ouverte), utilisée par l'écran
+#define HEAD_RANGE_DEG    90        // la tête tourne de -90 à +90 degrés autour de sa position de démarrage
+#define HEAD_STEPS_PER_DEG 11.378f  // 28BYJ-48 en demi-pas : 4096 par tour
+#define HEAD_STEP_US      2000      // délai entre deux demi-pas
+struct ServoCtl { uint8_t pin; float cur, target; int minD, maxD; };   // ici : l'IDE génère les prototypes avant le code
 #define TRAP_HOLD_MS      5000      // trappe ouverte après un badge accepté, puis refermée
 #define TRAP_REMOTE_HOLD_MS 30000   // ouverture ordonnée par le serveur sans durée : refermée au bout de ce délai
 

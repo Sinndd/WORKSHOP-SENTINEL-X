@@ -49,6 +49,7 @@ https://:443 {
 	redir @root /dashboard/ 308
 
 	reverse_proxy api:8000 {
+		flush_interval -1          # flux vidéo MJPEG : chaque image est transmise tout de suite, sans tampon
 		header_up X-Forwarded-Proto {scheme}
 		health_uri /health
 		health_interval 15s

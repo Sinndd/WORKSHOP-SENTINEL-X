@@ -1,7 +1,8 @@
 // Banc de test SENTINEL-X (ESP32 DevKit) : teste les éléments un par un, affiche le déroulé et le bilan sur l'OLED et le port série (115200).
 // Ordre : OLED, DHT22, MQ-2, LED RGB, buzzer, moteur, RC522, PIR (testé tard : chauffe ~60 s), Wi-Fi. Bouton BOOT : passer l'attente en cours / relancer le bilan.
 // Câblage : voir docs/esp32_centralise/02_PINOUT_ET_CABALAGE.md (OLED D21/D22, DHT D14, PIR D13, MQ-2 D34, RGB D25/D26/D27,
-// buzzer D33, RC522 SS D5 RST D4 SCK D18 MISO D19 MOSI D23, moteur ULN2003 IN1 D32 IN2 D15 IN3 D2 IN4 D12).
+// buzzer D33, RC522 SS D5 RST D4 SCK D18 MISO D19 MOSI D23, servos bras G D32 / bras D D15 / trappe arriere D2, tete 28BYJ-48 via MCP23017 0x20 GPA0..3).
+// Voir docs/CABLAGE-COMPLET.md. Le test 'Moteurs' = tete + 3 servos.
 #include <Arduino.h>
 #include <Wire.h>
 #include <SPI.h>
@@ -27,7 +28,10 @@
 #define PIN_MISO 19
 #define PIN_MOSI 23
 #define PIN_BOOT 0
-const uint8_t MOTOR[4] = {32, 15, 2, 12};   // IN1..IN4 de l'ULN2003
+const uint8_t SERVO_PIN[3] = {32, 15, 2};
+const char* SERVO_NAME[3] = {"bras G", "bras D", "trappe AR"};
+#define MCP_ADDR 0x20
+const uint8_t HALF[8] = {0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9};
 
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 DHT dht(PIN_DHT, DHT22);
@@ -35,7 +39,7 @@ MFRC522 rfid(PIN_SS, PIN_RST);
 bool oledOk = false;
 
 enum { T_PEND = 0, T_OK = 1, T_KO = 2, T_VIS = 3 };    // T_VIS : test visuel/sonore, à constater
-const char* NAMES[9] = {"OLED", "DHT22", "MQ-2", "PIR", "LED RGB", "Buzzer", "Moteur", "RC522", "Wi-Fi 2.4G"};
+const char* NAMES[9] = {"OLED", "DHT22", "MQ-2", "PIR", "LED RGB", "Buzzer", "Moteurs", "RC522", "Wi-Fi 2.4G"};
 uint8_t res[9];
 String detail[9];
 
@@ -123,23 +127,33 @@ void testBuzzer() {
   finish(5, T_VIS, "3 bips emis");
 }
 
-// ---- 7. Moteur 28BYJ-48 : 1024 demi-pas (~90 deg) dans un sens puis dans l'autre ----
-void stepMotor(int steps, int dir) {
-  static const uint8_t seq[8][4] = {{1,0,0,0},{1,1,0,0},{0,1,0,0},{0,1,1,0},{0,0,1,0},{0,0,1,1},{0,0,0,1},{1,0,0,1}};
-  static int phase = 0;
-  for (int s = 0; s < steps; s++) {
-    phase = (phase + dir + 8) % 8;
-    for (int k = 0; k < 4; k++) digitalWrite(MOTOR[k], seq[phase][k]);
-    delay(3);
-  }
-  for (int k = 0; k < 4; k++) digitalWrite(MOTOR[k], LOW);   // coupe le courant : le moteur chauffe sinon
-}
+// ---- 7. Moteurs : tête 28BYJ-48 (MCP23017) + 3 servos (PWM 50 Hz, balayage 60..120 deg) ----
+bool mcpWrite(uint8_t reg, uint8_t v) { Wire.beginTransmission(MCP_ADDR); Wire.write(reg); Wire.write(v); return Wire.endTransmission() == 0; }
+bool mcpSet(uint8_t nib) { return mcpWrite(0x14, nib & 0x0F); }   // OLATA : GPA0..3 = IN1..IN4
+void servoDeg(int i, int deg) { uint32_t us = 500 + (uint32_t)deg * 2000 / 180; ledcWrite(SERVO_PIN[i], (uint32_t)((uint64_t)us * 65535 / 20000)); }
 void testMotor() {
-  screen("TEST 6/9  MOTEUR", "Sens horaire...", "~90 degres");
-  stepMotor(1024, +1); delay(400);
-  screen("TEST 6/9  MOTEUR", "Sens inverse...", "retour a 0");
-  stepMotor(1024, -1);
-  finish(6, T_VIS, "1024 demi-pas aller/retour");
+  Wire.beginTransmission(MCP_ADDR);
+  bool mcp = Wire.endTransmission() == 0;
+  String d;
+  if (mcp) {
+    mcpWrite(0x00, 0x00); mcpWrite(0x01, 0x00); mcpSet(0);
+    screen("TEST 6/9  MOTEURS", "Tete (MCP23017)", "1 tour horaire");
+    int idx = 0;
+    for (int i = 0; i < 4096; i++) { idx = (idx + 1) & 7; mcpSet(HALF[idx]); delayMicroseconds(1800); }
+    screen("TEST 6/9  MOTEURS", "Tete (MCP23017)", "1 tour inverse");
+    for (int i = 0; i < 4096; i++) { idx = (idx + 7) & 7; mcpSet(HALF[idx]); delayMicroseconds(1800); }
+    mcpSet(0);
+    d = "tete OK";
+  } else { screen("TEST 6/9  MOTEURS", "MCP23017 ABSENT", "tete non testee", "verifier I2C 0x20"); d = "MCP23017 absent"; delay(2000); }
+  for (int i = 0; i < 3; i++) {
+    screen("TEST 6/9  MOTEURS", SERVO_NAME[i], "balayage 60..120");
+    servoDeg(i, 90); delay(500);
+    for (int a = 90; a <= 120; a++) { servoDeg(i, a); delay(15); }
+    for (int a = 120; a >= 60; a--) { servoDeg(i, a); delay(15); }
+    for (int a = 60; a <= 90; a++) { servoDeg(i, a); delay(15); }
+    delay(300); ledcWrite(SERVO_PIN[i], 0);
+  }
+  finish(6, mcp ? T_VIS : T_KO, d + ", 3 servos balayes");
 }
 
 // ---- 8. RC522 : version puis un badge (20 s max) ----
@@ -217,7 +231,7 @@ void setup() {
   pinMode(PIN_PIR, INPUT_PULLDOWN);
   pinMode(PIN_R, OUTPUT); pinMode(PIN_G, OUTPUT); pinMode(PIN_B, OUTPUT); pinMode(PIN_BUZ, OUTPUT);
   digitalWrite(PIN_BUZ, LOW); setRGB(0, 0, 0);
-  for (int k = 0; k < 4; k++) { pinMode(MOTOR[k], OUTPUT); digitalWrite(MOTOR[k], LOW); }
+  for (int i = 0; i < 3; i++) { ledcAttach(SERVO_PIN[i], 50, 16); ledcWrite(SERVO_PIN[i], 0); }
   analogReadResolution(12); analogSetPinAttenuation(PIN_GAS, ADC_11db);
   Wire.begin(PIN_SDA, PIN_SCL);
   oledOk = oled.begin(SSD1306_SWITCHCAPVCC, 0x3C);

@@ -295,9 +295,11 @@ Passe le badge à `active: false`. Il est conservé pour l'historique des passag
 Le corps est **exactement** le message attendu par l'ESP32. Il est validé puis publié sur `sentinel/commands`
 (QoS 1) et journalisé. Le champ `action` détermine le format.
 
+Raccourci superviseur (rôle opérateur) : `POST /api/v1/actuators/move` avec `{"target":"ARM_LEFT","command":"SET_ANGLE","angle":120}` (`target` : `ARM_LEFT`, `ARM_RIGHT`, `HEAD`, `TRAP_REAR`). Réponse 202, ou 422 si l'angle est absent ou hors limites.
+
 | `action` | Champs | Source |
 |---|---|---|
-| `OPERATE_MOTOR` | `target` : `AIRLOCK_MAIN` \| `GAS_VALVE` \| `BARRIER` \| `VENT` ; `command` : `OPEN` \| `CLOSE` \| `STOP` ; `duration_ms` (1–60000, facultatif) | 03_SPECIFICATION § 2.A |
+| `OPERATE_MOTOR` | `target` : `AIRLOCK_MAIN` \| `TRAP_REAR` \| `ARM_LEFT` \| `ARM_RIGHT` \| `HEAD` \| `GAS_VALVE` \| `BARRIER` \| `VENT` ; `command` : `OPEN` \| `CLOSE` \| `STOP` \| `CENTER` \| `SET_ANGLE` ; `angle` (obligatoire avec `SET_ANGLE` : bras 0–180, tête -90–90) ; `duration_ms` (1–60000, facultatif) | 03_SPECIFICATION § 2.A, `docs/CONTRAT-MQTT.md` § 5.1 |
 | `CONTROL_MOTORS` | `commands` : 1 à 6 éléments `{motor_id (0–5, unique), direction: CW\|CCW, angle_deg (1–3600), speed_rpm (1–15)}` | 03_CONTRAT § 3.A |
 | `EMERGENCY_STOP_ALL` | — | 03_CONTRAT § 3.B |
 | `TRIGGER_ALARM` | `state` (booléen) ; `color`, `sound` facultatifs (codes en majuscules, ex. `RED`, `SIREN_ALERT`) | 03_SPECIFICATION § 2.B |

@@ -34,6 +34,10 @@ class Models(unittest.TestCase):
                                    "door_id": "AIRLOCK_MAIN"})
         for cmd in (
             {"action": "OPERATE_MOTOR", "target": "AIRLOCK_MAIN", "command": "OPEN", "duration_ms": 3000},
+            {"action": "OPERATE_MOTOR", "target": "ARM_LEFT", "command": "SET_ANGLE", "angle": 120},
+            {"action": "OPERATE_MOTOR", "target": "HEAD", "command": "SET_ANGLE", "angle": -45},
+            {"action": "OPERATE_MOTOR", "target": "HEAD", "command": "CENTER"},
+            {"action": "OPERATE_MOTOR", "target": "TRAP_REAR", "command": "CLOSE"},
             {"action": "CONTROL_MOTORS", "commands": [
                 {"motor_id": 0, "direction": "CW", "angle_deg": 90, "speed_rpm": 12},
                 {"motor_id": 1, "direction": "CCW", "angle_deg": 180, "speed_rpm": 8},
@@ -72,6 +76,12 @@ class Models(unittest.TestCase):
                                                        "speed_rpm": 40}]},
             {"action": "CONTROL_MOTORS", "commands": []},
             {"action": "TRIGGER_ALARM", "state": 1},
+            {"action": "OPERATE_MOTOR", "target": "ARM_LEFT", "command": "SET_ANGLE"},                 # angle manquant
+            {"action": "OPERATE_MOTOR", "target": "ARM_LEFT", "command": "SET_ANGLE", "angle": 181},
+            {"action": "OPERATE_MOTOR", "target": "HEAD", "command": "SET_ANGLE", "angle": 120},      # tête : -90..90
+            {"action": "OPERATE_MOTOR", "target": "ARM_RIGHT", "command": "OPEN"},
+            {"action": "OPERATE_MOTOR", "target": "TRAP_REAR", "command": "SET_ANGLE", "angle": 10},
+            {"action": "OPERATE_MOTOR", "target": "TRAP_REAR", "command": "OPEN", "angle": 10},
         ]
         for cmd in bad_commands:
             with self.subTest(cmd), self.assertRaises(ValidationError):

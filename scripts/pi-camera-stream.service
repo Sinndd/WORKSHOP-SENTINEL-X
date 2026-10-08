@@ -1,0 +1,25 @@
+# Service systemd du flux caméra du Raspberry : démarre au boot et redémarre en cas de panne.
+# Installation sur le Pi (une fois) :
+#   sudo cp pi-camera-stream.sh /usr/local/bin/ && sudo chmod +x /usr/local/bin/pi-camera-stream.sh
+#   sudo cp pi-camera-stream.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now pi-camera-stream
+# Journal : journalctl -u pi-camera-stream -f      Arrêt : sudo systemctl stop pi-camera-stream
+[Unit]
+Description=SENTINEL-X : flux camera MJPEG vers le PC
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/pi-camera-stream.sh
+Restart=always
+DynamicUser=yes
+RestartSec=2
+SupplementaryGroups=video
+# Durcissement : ce service n'a besoin que de la caméra et du réseau.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

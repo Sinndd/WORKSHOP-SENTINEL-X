@@ -1,0 +1,22 @@
+# Service utilisateur du PC : caméra du Raspberry -> IA (YOLO + visages) -> tableau de bord du Pi (30 images/s).
+# Installation :  mkdir -p ~/.config/systemd/user && cp scripts/sentinel-vision.service ~/.config/systemd/user/
+#                 puis créer ~/.config/sentinel-vision.env (chmod 600) avec :
+#                   API_TOKEN=<API_TOKEN du .env du Raspberry>   SENTINEL_API_URL=https://10.42.0.207   CAMERA_SOURCE=tcp://10.42.0.207:5001
+#                 systemctl --user daemon-reload && systemctl --user enable --now sentinel-vision
+# Journal : journalctl --user -u sentinel-vision -f
+[Unit]
+Description=SENTINEL-X : flux camera + IA vers le tableau de bord
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/Documents/GitHub/WORKSHOP-SENTINEL-X
+EnvironmentFile=%h/.config/sentinel-vision.env
+Environment=PYTHONPATH=%h/Documents/GitHub/WORKSHOP-SENTINEL-X
+ExecStart=%h/Documents/GitHub/WORKSHOP-SENTINEL-X/.venv-vision/bin/python -m sentinel_x.ai.dashboard_stream
+Restart=always
+RestartSec=3
+# Le PC n'a besoin que du réseau et de la lecture du dépôt.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

@@ -146,12 +146,21 @@ sur `sentinel/access/response` (§ 5.2) en moins d'une seconde.
 
 Les messages sont publiés par l'API (`POST /api/v1/commands`) après validation. Le champ `action` détermine le format.
 
-**`OPERATE_MOTOR`** (03_SPECIFICATION § 2.A) : `target` ∈ `AIRLOCK_MAIN` (moteur 1), `GAS_VALVE` (moteur 2),
-`BARRIER` (moteur 3), `VENT` (moteur 4) ; `command` ∈ `OPEN`, `CLOSE`, `STOP` ; `duration_ms` (1–60000) facultatif.
+**`OPERATE_MOTOR`** : `target` ∈ `TRAP_REAR` (trappe arrière, servo ; `AIRLOCK_MAIN` est son alias, c'est la trappe des badges),
+`ARM_LEFT`, `ARM_RIGHT` (servos, 0 à 180°), `HEAD` (28BYJ-48 via MCP23017, -90 à +90° autour de la position de démarrage).
+`command` ∈ `OPEN`, `CLOSE` (trappe), `SET_ANGLE` (bras, tête : champ `angle` obligatoire), `CENTER` (bras, tête : position de repos), `STOP` ;
+`duration_ms` (1–60000) facultatif pour `OPEN`. Les mouvements sont lissés (150°/s maximum). Les butées mécaniques sont dans `config.h`
+(`ARM_MIN_DEG`, `ARM_MAX_DEG`, `TRAP_CLOSED_DEG`, `TRAP_OPEN_DEG`). `GAS_VALVE`, `BARRIER` et `VENT` sont acceptés par l'API mais ignorés par le firmware.
 
 ```json
-{"action":"OPERATE_MOTOR","target":"AIRLOCK_MAIN","command":"OPEN","duration_ms":3000}
+{"action":"OPERATE_MOTOR","target":"TRAP_REAR","command":"OPEN","duration_ms":3000}
+{"action":"OPERATE_MOTOR","target":"ARM_LEFT","command":"SET_ANGLE","angle":120}
+{"action":"OPERATE_MOTOR","target":"HEAD","command":"SET_ANGLE","angle":-45}
+{"action":"OPERATE_MOTOR","target":"HEAD","command":"CENTER"}
 ```
+
+La télémétrie renvoie les positions dans `actuators_state` : `arm_left_deg`, `arm_right_deg`, `head_deg`, `trap_pos_percent`
+(champs facultatifs, ignorés par l'API actuelle). `EMERGENCY_STOP_ALL` fige les bras, la tête et la trappe.
 
 **`CONTROL_MOTORS`** (03_CONTRAT § 3.A) : 1 à 6 ordres simultanés. `motor_id` vaut de 0 à 5 et doit être unique dans le
 message. `direction` vaut `CW` ou `CCW`, `angle_deg` de 1 à 3600, `speed_rpm` de 1 à 15 (maximum du 28BYJ-48).

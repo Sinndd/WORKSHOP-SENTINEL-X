@@ -108,48 +108,122 @@ void setRGB(bool r, bool g, bool b) {
 
 #if defined(ESP32)
 // =====================================================================================================
-// TRAPPE : moteur 28BYJ-48 (ULN2003), machine à états non bloquante (aucun delay)
+// ACTIONNEURS : 3 servos (bras gauche, bras droit, trappe arrière) + tête 28BYJ-48 via MCP23017.
+// Machines à états non bloquantes (aucun delay) : les mouvements sont lissés, jamais brusques.
 // =====================================================================================================
 void sendAlertMQTT(const char* event_type, const char* severity, const char* source, float val, const char* details);
 
+// ---- servos ----
+ServoCtl armL = {PIN_SERVO_ARM_L, ARM_REST_DEG, ARM_REST_DEG, ARM_MIN_DEG, ARM_MAX_DEG};
+ServoCtl armR = {PIN_SERVO_ARM_R, ARM_REST_DEG, ARM_REST_DEG, ARM_MIN_DEG, ARM_MAX_DEG};
+ServoCtl trapServo = {PIN_SERVO_TRAP, TRAP_CLOSED_DEG, TRAP_CLOSED_DEG,
+                      min(TRAP_CLOSED_DEG, TRAP_OPEN_DEG), max(TRAP_CLOSED_DEG, TRAP_OPEN_DEG)};
+unsigned long lastServoMs = 0;
+
+void servoPwm(const ServoCtl& s) {
+  uint32_t us = 500 + (uint32_t)(s.cur * 2000.0f / 180.0f + 0.5f);   // 500..2500 us
+  ledcWrite(s.pin, (uint32_t)((uint64_t)us * 65535 / 20000));
+}
+void servoSet(ServoCtl& s, float deg) { s.target = constrain(deg, (float)s.minD, (float)s.maxD); }
+void servoFreeze(ServoCtl& s) { s.target = s.cur; }
+bool servoArrived(const ServoCtl& s) { return fabsf(s.target - s.cur) < 0.5f; }
+void servoInit(ServoCtl& s) { ledcAttach(s.pin, 50, 16); servoPwm(s); }
+void servoStepOne(ServoCtl& s, float maxStep) {
+  float d = s.target - s.cur;
+  if (fabsf(d) < 0.01f) return;
+  s.cur += (fabsf(d) <= maxStep) ? d : (d > 0 ? maxStep : -maxStep);
+  servoPwm(s);
+}
+void servoTick() {
+  unsigned long now = millis();
+  if (now - lastServoMs < 10) return;
+  float maxStep = SERVO_SPEED_DPS * (now - lastServoMs) / 1000.0f;
+  lastServoMs = now;
+  servoStepOne(armL, maxStep); servoStepOne(armR, maxStep); servoStepOne(trapServo, maxStep);
+}
+
+// ---- trappe arrière (servo) : même automate que l'ancienne trappe, l'écran et la télémétrie n'ont rien à changer ----
 enum TrapState { TRAP_CLOSED, TRAP_OPENING, TRAP_OPEN, TRAP_CLOSING };
 TrapState trapState = TRAP_CLOSED;
-const uint8_t MOTOR_PINS[4] = {PIN_MOTOR_IN1, PIN_MOTOR_IN2, PIN_MOTOR_IN3, PIN_MOTOR_IN4};
-const uint8_t HALF_STEP[8][4] = {{1,0,0,0},{1,1,0,0},{0,1,0,0},{0,1,1,0},{0,0,1,0},{0,0,1,1},{0,0,0,1},{1,0,0,1}};
-long trapPos = 0;                    // demi-pas depuis la position fermée (0..TRAP_STEPS)
-int trapPhase = 0;
-unsigned long lastStepUs = 0, trapOpenSince = 0, trapHoldMs = 0;   // trapHoldMs = 0 : reste ouverte jusqu'à un ordre CLOSE
-
-void motorRelease() { for (int k = 0; k < 4; k++) digitalWrite(MOTOR_PINS[k], LOW); }   // coupe le courant : sinon le moteur chauffe
+long trapPos = 0;                    // progression 0..TRAP_STEPS (0 = fermée)
+unsigned long trapOpenSince = 0, trapHoldMs = 0;   // trapHoldMs = 0 : reste ouverte jusqu'à un ordre CLOSE
 
 void trapOpen(unsigned long holdMs) {
   trapHoldMs = holdMs;
-  if (trapState == TRAP_CLOSED || trapState == TRAP_CLOSING) trapState = TRAP_OPENING;
+  if (trapState == TRAP_CLOSED || trapState == TRAP_CLOSING) { trapState = TRAP_OPENING; servoSet(trapServo, TRAP_OPEN_DEG); }
   else if (trapState == TRAP_OPEN) trapOpenSince = millis();   // déjà ouverte : prolonge
 }
-void trapClose() { if (trapState == TRAP_OPEN || trapState == TRAP_OPENING) trapState = TRAP_CLOSING; }
+void trapClose() {
+  if (trapState == TRAP_OPEN || trapState == TRAP_OPENING) { trapState = TRAP_CLOSING; servoSet(trapServo, TRAP_CLOSED_DEG); }
+}
 void trapStop() {
-  motorRelease();
-  trapState = (trapPos == 0) ? TRAP_CLOSED : TRAP_OPEN;
+  servoFreeze(trapServo);
+  trapState = (trapPos <= TRAP_STEPS / 50) ? TRAP_CLOSED : TRAP_OPEN;
   trapHoldMs = 0; trapOpenSince = millis();
 }
 
+// ---- tête (28BYJ-48 sur le MCP23017) : -HEAD_RANGE_DEG..+HEAD_RANGE_DEG autour de la position de démarrage ----
+enum : uint8_t { MCP_IODIRA = 0x00, MCP_IODIRB = 0x01, MCP_OLATA = 0x14, MCP_OLATB = 0x15 };
+const uint8_t HEAD_HALF[8] = {0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9};   // bit0..3 = IN1..IN4
+bool mcpOk = false;
+long headPos = 0, headTarget = 0;    // demi-pas depuis la position de démarrage
+int headPhase = 0;
+unsigned long lastHeadUs = 0;
+bool headMoving = false;
+
+bool mcpWrite(uint8_t reg, uint8_t v) { Wire.beginTransmission(MCP_ADDR); Wire.write(reg); Wire.write(v); return Wire.endTransmission() == 0; }
+void headInit() {
+  Wire.beginTransmission(MCP_ADDR);
+  mcpOk = (Wire.endTransmission() == 0);
+  if (mcpOk) mcpOk = mcpWrite(MCP_IODIRA, 0x00) && mcpWrite(MCP_IODIRB, 0x00) && mcpWrite(MCP_OLATA, 0x00) && mcpWrite(MCP_OLATB, 0x00);
+  Serial.printf("[HEAD] MCP23017 0x%02X : %s\n", MCP_ADDR, mcpOk ? "OK" : "ABSENT (tete desactivee)");
+}
+void headSetAngle(float deg) { headTarget = lroundf(constrain(deg, -(float)HEAD_RANGE_DEG, (float)HEAD_RANGE_DEG) * HEAD_STEPS_PER_DEG); }
+void headStop() { headTarget = headPos; if (mcpOk) mcpWrite(MCP_OLATA, 0x00); headMoving = false; }
+float headAngle() { return headPos / HEAD_STEPS_PER_DEG; }
+void updateHead() {
+  if (!mcpOk) return;
+  if (headPos == headTarget) { if (headMoving) { mcpWrite(MCP_OLATA, 0x00); headMoving = false; } return; }   // coupe les bobines à l'arrivée : elles chauffent sinon
+  unsigned long nowUs = micros();
+  if (nowUs - lastHeadUs < HEAD_STEP_US) return;
+  lastHeadUs = nowUs;
+  int dir = (headTarget > headPos) ? 1 : -1;
+  int ph = (headPhase + dir + 8) & 7;
+  if (!mcpWrite(MCP_OLATA, HEAD_HALF[ph])) return;   // bus perdu : on réessaie au tour suivant sans perdre le compte des pas
+  headPhase = ph; headPos += dir; headMoving = true;
+}
+
+// ---- boucle unique des actionneurs ----
 void updateTrap() {
-  if (trapState == TRAP_OPEN) {
-    if (trapHoldMs && millis() - trapOpenSince >= trapHoldMs) trapState = TRAP_CLOSING;
-  } else if (trapState == TRAP_OPENING || trapState == TRAP_CLOSING) {
-    unsigned long nowUs = micros();
-    if (nowUs - lastStepUs >= TRAP_STEP_US) {
-      lastStepUs = nowUs;
-      int dir = (trapState == TRAP_OPENING) ? +1 : -1;
-      trapPhase = (trapPhase + dir + 8) % 8;
-      for (int k = 0; k < 4; k++) digitalWrite(MOTOR_PINS[k], HALF_STEP[trapPhase][k]);
-      trapPos += dir;
-      if (trapState == TRAP_OPENING && trapPos >= TRAP_STEPS) { motorRelease(); trapState = TRAP_OPEN; trapOpenSince = millis(); }
-      if (trapState == TRAP_CLOSING && trapPos <= 0)          { trapPos = 0; motorRelease(); trapState = TRAP_CLOSED; }
-    }
-  }
+  servoTick();
+  updateHead();
+  trapPos = constrain((long)(TRAP_STEPS * (trapServo.cur - TRAP_CLOSED_DEG) / (float)(TRAP_OPEN_DEG - TRAP_CLOSED_DEG)), 0L, (long)TRAP_STEPS);
+  if (trapState == TRAP_OPENING && servoArrived(trapServo)) { trapState = TRAP_OPEN; trapOpenSince = millis(); }
+  else if (trapState == TRAP_CLOSING && servoArrived(trapServo)) trapState = TRAP_CLOSED;
+  else if (trapState == TRAP_OPEN && trapHoldMs && millis() - trapOpenSince >= trapHoldMs) trapClose();
   airlockOpen = (trapState != TRAP_CLOSED);   // reflété dans la télémétrie (actuators_state.airlock_open)
+}
+
+// Ordre OPERATE_MOTOR du serveur : target = TRAP_REAR (alias AIRLOCK_MAIN) | ARM_LEFT | ARM_RIGHT | HEAD
+// command = OPEN | CLOSE | STOP | CENTER | SET_ANGLE (+ "angle" : bras 0..180, tête -90..90)
+void operateActuator(const char* target, const char* command, JsonDocument& doc) {
+  bool isAngle = strcmp(command, "SET_ANGLE") == 0, isCenter = strcmp(command, "CENTER") == 0, isStop = strcmp(command, "STOP") == 0;
+  float angle = doc["angle"] | 0.0f;
+  if (strcmp(target, "AIRLOCK_MAIN") == 0 || strcmp(target, "TRAP_REAR") == 0) {
+    unsigned long dur = doc["duration_ms"] | 0;
+    if (strcmp(command, "OPEN") == 0) trapOpen(dur ? dur : TRAP_REMOTE_HOLD_MS);
+    else if (strcmp(command, "CLOSE") == 0) trapClose();
+    else if (isStop) trapStop();
+  } else if (strcmp(target, "ARM_LEFT") == 0 || strcmp(target, "ARM_RIGHT") == 0) {
+    ServoCtl& arm = (strcmp(target, "ARM_LEFT") == 0) ? armL : armR;
+    if (isAngle) servoSet(arm, angle);
+    else if (isCenter) servoSet(arm, ARM_REST_DEG);
+    else if (isStop) servoFreeze(arm);
+  } else if (strcmp(target, "HEAD") == 0) {
+    if (isAngle) headSetAngle(angle);
+    else if (isCenter) headSetAngle(0);
+    else if (isStop) headStop();
+  }
 }
 
 // =====================================================================================================
@@ -501,7 +575,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     const char* action = doc["action"] | "";
     if (strcmp(action, "EMERGENCY_STOP_ALL") == 0) {
 #if defined(ESP32)
-      trapStop();
+      trapStop(); servoFreeze(armL); servoFreeze(armR); headStop();
 #endif
       alarmActive = false;
       localGasAlarm = false;
@@ -510,13 +584,7 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     } else if (strcmp(action, "OPERATE_MOTOR") == 0) {
       const char* command = doc["command"] | "";
 #if defined(ESP32)
-      const char* target = doc["target"] | "AIRLOCK_MAIN";
-      if (strcmp(target, "AIRLOCK_MAIN") == 0) {      // seule la trappe est câblée ; les autres cibles sont ignorées
-        unsigned long dur = doc["duration_ms"] | 0;
-        if (strcmp(command, "OPEN") == 0) trapOpen(dur ? dur : TRAP_REMOTE_HOLD_MS);
-        else if (strcmp(command, "CLOSE") == 0) trapClose();
-        else if (strcmp(command, "STOP") == 0) trapStop();
-      }
+      operateActuator(doc["target"] | "AIRLOCK_MAIN", command, doc);
 #else
       airlockOpen = (strcmp(command, "OPEN") == 0);
 #endif
@@ -674,6 +742,12 @@ void sendTelemetry() {
   JsonObject actuators = doc["actuators_state"].to<JsonObject>();
   actuators["airlock_open"] = airlockOpen;
   actuators["alarm_active"] = (alarmActive || localGasAlarm);
+#if defined(ESP32)
+  actuators["arm_left_deg"] = (int)lroundf(armL.cur);
+  actuators["arm_right_deg"] = (int)lroundf(armR.cur);
+  actuators["head_deg"] = (int)lroundf(headAngle());
+  actuators["trap_pos_percent"] = (int)(trapPos * 100 / TRAP_STEPS);
+#endif
 
   JsonObject sys = doc["system"].to<JsonObject>();
   sys["wifi_rssi_dbm"] = WiFi.RSSI();
@@ -779,7 +853,7 @@ void setup() {
 
 #if defined(ESP32)
   uiBoot("Capteurs...", 35);
-  for (int k = 0; k < 4; k++) { pinMode(MOTOR_PINS[k], OUTPUT); digitalWrite(MOTOR_PINS[k], LOW); }
+  servoInit(armL); servoInit(armR); servoInit(trapServo); headInit();
   pinMode(PIN_BOOT, INPUT_PULLUP);
   if (!parseMasterKey()) Serial.println(F("[RFID] ERREUR : CARD_MASTER_KEY invalide (32 caracteres hexadecimaux attendus dans secrets.h)"));
   SPI.begin(PIN_RFID_SCK, PIN_RFID_MISO, PIN_RFID_MOSI, PIN_RFID_SS);
