@@ -306,3 +306,40 @@ class Hardening(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Faces(unittest.TestCase):
+    """Visages : droits d'accès et validation (sans base)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = TestClient(app)
+        cls.op = {"Authorization": "Bearer op"}
+
+    def test_requires_authentication(self):
+        for method, path in (("get", "/api/v1/faces"), ("get", "/api/v1/faces/embeddings"),
+                             ("post", "/api/v1/faces/enrollments"), ("delete", "/api/v1/faces/1")):
+            with self.subTest(path):
+                self.assertEqual(getattr(self.client, method)(path).status_code, 401)
+
+    def test_service_token_cannot_manage_faces(self):
+        # Le jeton de service est « operator » : il lit pour le script de vision mais n'administre pas.
+        body = {"name": "Test", "consent": True, "mode": "camera"}
+        self.assertEqual(self.client.post("/api/v1/faces/enrollments", json=body, headers=self.op).status_code, 403)
+        self.assertEqual(self.client.delete("/api/v1/faces/1", headers=self.op).status_code, 403)
+        self.assertEqual(self.client.patch("/api/v1/faces/1", json={"active": False}, headers=self.op).status_code, 403)
+
+    def test_device_token_is_not_enough(self):
+        self.assertEqual(self.client.get("/api/v1/faces/embeddings", headers={"Authorization": "Bearer dev"}).status_code, 401)
+
+    def test_embedding_validation(self):
+        from app.faces import _valid_embedding
+        self.assertTrue(_valid_embedding([0.1] * 128))
+        self.assertFalse(_valid_embedding([0.1] * 127))
+        self.assertFalse(_valid_embedding([float("inf")] + [0.0] * 127))
+        self.assertFalse(_valid_embedding([9.0] + [0.0] * 127))
+
+    def test_oversized_photo_refused_before_reading(self):
+        r = self.client.post("/api/v1/faces/enrollments/photo?name=x&consent=true", headers={**self.op, "Content-Length": "3000000"},
+                             content=b"\xff\xd8\xff" + b"0" * 10)
+        self.assertIn(r.status_code, (400, 403, 413))

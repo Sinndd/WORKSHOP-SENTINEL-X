@@ -11,7 +11,7 @@ WINDOW_SIZE = 5
 MIN_CONFIRMATIONS = 3
 
 stream = LatestFrameStream(STREAM_URL)
-matcher = FaceMatcher()
+matcher = FaceMatcher("data/authorized_faces.json")   # base JSON locale (voir authorized_faces.py)
 
 history = deque(maxlen=WINDOW_SIZE)
 last_status = None

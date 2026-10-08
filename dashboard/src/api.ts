@@ -35,6 +35,11 @@ export async function send<T = void>(method: "POST" | "PATCH" | "PUT" | "DELETE"
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+/** Envoie une image brute (corps = fichier) ; l'API lit le reste dans l'URL. */
+export async function uploadImage<T>(path: string, token: string, image: Blob): Promise<T> {
+  return (await request(path, token, { method: "POST", body: image, headers: { "Content-Type": image.type || "image/jpeg" } })).json() as Promise<T>;
+}
+
 export const postJson = <T>(path: string, token: string, body?: unknown) => send<T>("POST", path, token, body);
 
 export interface Session {

@@ -178,3 +178,26 @@ export interface Enrollment {
   expires_at: string;
   finished_at: string | null;
 }
+
+export interface FaceMember {
+  id: number;
+  name: string;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+  samples: number;
+}
+
+export interface FaceEnrollment {
+  id: number;
+  member_id: number;
+  name: string;
+  mode: "camera" | "photo";
+  samples_target: number;
+  samples_done: number;
+  status: EnrollStatus;
+  error: string | null;
+  created_at: string;
+  expires_at: string;
+  finished_at: string | null;
+}

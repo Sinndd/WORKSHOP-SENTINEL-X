@@ -149,6 +149,7 @@ class AiWorker(threading.Thread):
         self.result_at = 0.0
         self.fps = 0.0
         self.loading = True
+        self.pipeline = None          # renseigné une fois les modèles chargés (utilisé par FaceSync)
 
     def run(self) -> None:
         from sentinel_x.ai.authorized_vision import AuthorizedVisionPipeline   # import lourd (torch) : hors du chemin vidéo
@@ -158,6 +159,7 @@ class AiWorker(threading.Thread):
         cv2.setNumThreads(2)
         log("IA : chargement des modèles (YOLO, visages)...")
         pipeline = AuthorizedVisionPipeline(image_size=320, face_tolerance=0.55, window_size=5, min_confirmations=3)
+        self.pipeline = pipeline
         self.loading = False
         log("IA : prête")
         last_seq, t0, n = 0, time.monotonic(), 0
@@ -179,6 +181,117 @@ class AiWorker(threading.Thread):
             spare = 1.0 / self.max_fps - (time.monotonic() - started)    # plafond de cadence : laisse du CPU à la vidéo
             if spare > 0:
                 time.sleep(spare)
+
+
+class FaceSync(threading.Thread):
+    """Visages autorisés, gérés depuis l'onglet « Visages » du tableau de bord (API /api/v1/faces).
+
+      - recharge la base de visages dans l'IA dès qu'elle change (empreinte /faces/version, sondée toutes les 5 s) ;
+      - exécute les demandes d'enrôlement : « caméra » (échantillons pris sur le flux en direct) ou « photo » (image envoyée).
+    Le modèle de reconnaissance n'existe que sur cette machine : l'API ne reçoit que des vecteurs de 128 nombres."""
+
+    def __init__(self, ai: AiWorker, camera: CameraSource, api: str, token: str, verify: str | bool) -> None:
+        super().__init__(name="visages", daemon=True)
+        self.ai, self.camera, self.base, self.verify = ai, camera, api.rstrip("/") + "/api/v1/faces", verify
+        self.http = requests.Session()
+        self.http.headers.update({"Authorization": f"Bearer {token}"})
+        self.version: str | None = None
+        self.errors = 0
+
+    def _call(self, method: str, path: str, **kw):
+        r = self.http.request(method, self.base + path, timeout=5, verify=self.verify, **kw)
+        return r
+
+    def run(self) -> None:
+        while self.ai.pipeline is None:
+            time.sleep(1)
+        matcher = self.ai.pipeline.face_matcher
+        log("visages : synchronisation avec l'API activée")
+        last_sync = 0.0
+        while True:
+            try:
+                jobs = self._call("GET", "/enrollments")
+                jobs.raise_for_status()
+                for job in jobs.json():
+                    self._enroll(matcher, job)
+                    last_sync = 0.0                                    # recharge la base tout de suite après
+                if time.monotonic() - last_sync >= 5:
+                    last_sync = time.monotonic()
+                    self._sync(matcher)
+                self.errors = 0
+            except Exception as exc:
+                self.errors += 1
+                if self.errors in (1, 10) or self.errors % 60 == 0:
+                    log(f"visages : API injoignable ou refus ({exc})")
+            time.sleep(1)
+
+    def _sync(self, matcher) -> None:
+        v = self._call("GET", "/version")
+        v.raise_for_status()
+        version = v.json()["version"]
+        if version == self.version:
+            return
+        r = self._call("GET", "/embeddings")
+        r.raise_for_status()
+        matcher.set_database(r.json()["members"])
+        self.version = version
+
+    def _post(self, job_id: int, path: str, payload: dict) -> dict | None:
+        r = self._call("POST", f"/enrollments/{job_id}/{path}", json=payload)
+        if r.status_code == 409:                                       # annulé, expiré ou terminé côté tableau de bord
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    def _enroll(self, matcher, job: dict) -> None:
+        log(f"enrôlement de « {job['name']} » ({job['mode']}, {job['samples_target']} échantillon(s))")
+        if job["mode"] == "photo":
+            self._enroll_photo(matcher, job)
+        else:
+            self._enroll_camera(matcher, job)
+
+    def _enroll_photo(self, matcher, job: dict) -> None:
+        import base64
+        img = cv2.imdecode(np.frombuffer(base64.b64decode(job["photo_b64"] or ""), np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            self._post(job["id"], "fail", {"error": "image illisible"})
+            return
+        h, w = img.shape[:2]
+        if max(h, w) > 1600:                                           # photo d'appareil : on réduit (détection plus rapide)
+            k = 1600 / max(h, w)
+            img = cv2.resize(img, (int(w * k), int(h * k)), interpolation=cv2.INTER_AREA)
+        faces = matcher.encode_faces(img, upsample=1)
+        if len(faces) != 1:
+            msg = "aucun visage détecté sur la photo" if not faces else f"{len(faces)} visages sur la photo : une seule personne attendue"
+            self._post(job["id"], "fail", {"error": msg})
+            return
+        self._post(job["id"], "embeddings", {"embeddings": [faces[0].tolist()]})
+
+    def _enroll_camera(self, matcher, job: dict) -> None:
+        deadline = time.monotonic() + 85
+        last_seq, last_sample, last_hint = 0, 0.0, 0.0
+        while time.monotonic() < deadline:
+            frame, seq = self.camera.wait_new(last_seq, 1.0)
+            if frame is None or seq == last_seq:
+                continue
+            last_seq = seq
+            now = time.monotonic()
+            if now - last_sample < 0.8:                                # échantillons espacés : le visage a le temps de bouger
+                continue
+            faces = matcher.encode_faces(frame, upsample=0)
+            if len(faces) != 1:
+                if now - last_hint > 2:
+                    last_hint = now
+                    hint = "Aucun visage devant la caméra" if not faces else "Plusieurs visages : une seule personne devant la caméra"
+                    if self._post(job["id"], "progress", {"error": hint}) is None:
+                        return
+                continue
+            last_sample = now
+            res = self._post(job["id"], "embeddings", {"embeddings": [faces[0].tolist()]})
+            if res is None or res["status"] != "PENDING":
+                return
+            log(f"  échantillon {res['samples_done']}/{res['samples_target']}")
+        self._post(job["id"], "fail", {"error": "délai écoulé : visage non vu assez longtemps"})
 
 
 class Sender:
@@ -265,6 +378,8 @@ def main() -> int:
     if not args.no_ai:
         ai = AiWorker(camera, args.ai_fps)
         ai.start()
+    if ai is not None:
+        FaceSync(ai, camera, args.api, args.token, args.cafile or True).start()
     sender = Sender(args.api.rstrip("/") + "/api/v1/vision/snapshot", args.token, args.cafile or True)
     sender.start()
     from sentinel_x.ai.overlay import draw_hud, draw_persons
