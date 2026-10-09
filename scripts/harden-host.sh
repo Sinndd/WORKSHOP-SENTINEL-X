@@ -13,7 +13,7 @@
 # demande de confirmer depuis une NOUVELLE session SSH ; sans réponse sous 120 s, tout est annulé.
 #
 # Idempotent. Usage : sudo ./scripts/harden-host.sh [--dry-run] [--yes]
-# Variables : LAN_IF=wlan0 LAN_NET=192.168.10.0/24 WAN_IF=eth0 SSH_FROM_WAN=yes
+# Variables : LAN_IF=wlan0 LAN_NET=192.168.10.0/24 WAN_IF=eth0 SSH_FROM_WAN=yes CAM_NET=10.42.0.0/24 SSH_PASSWORDS=keep
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,6 +30,7 @@ done
 [[ -f .env ]] && { set -a; . ./.env; set +a; }
 LAN_IF="${LAN_IF:-wlan0}"; LAN_NET="${LAN_NET:-192.168.10.0/24}"
 WAN_IF="${WAN_IF:-eth0}";  SSH_FROM_WAN="${SSH_FROM_WAN:-yes}"
+CAM_PORT="${CAM_PORT:-5001}"; CAM_NET="${CAM_NET:-10.42.0.0/24}"   # flux caméra (scripts/pi-camera-stream.sh) : câble Pi <-> PC
 MQTT_PORT="${MQTT_PORT:-8883}"; HTTPS_PORT="${HTTPS_PORT:-443}"; HTTP_PORT="${HTTP_PORT:-80}"; NTP_PORT="${NTP_PORT:-123}"
 SSHD_DROPIN=/etc/ssh/sshd_config.d/01-sentinel-hardening.conf   # "01" : prioritaire (1re valeur lue gagne)
 AFTER_RULES=/etc/ufw/after.rules
@@ -46,6 +47,7 @@ admin="${SUDO_USER:-$(id -un)}"
 admin_home="$(getent passwd "$admin" | cut -d: -f6)"
 keys="$admin_home/.ssh/authorized_keys"
 DISABLE_PASSWORDS=1
+[[ "${SSH_PASSWORDS:-disable}" == "keep" ]] && { DISABLE_PASSWORDS=0; log "SSH_PASSWORDS=keep : l'authentification par mot de passe est CONSERVÉE."; }
 if [[ ! -s "$keys" ]]; then
   warn "$keys absent ou vide : l'authentification par mot de passe est CONSERVÉE."
   warn "Copier d'abord une clé : ssh-copy-id $admin@<ip-du-pi>, puis relancer."
@@ -90,6 +92,12 @@ run ufw default deny incoming
 run ufw default allow outgoing
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port 22 proto tcp comment 'SSH depuis le Wi-Fi table'
 [[ "$SSH_FROM_WAN" == "yes" ]] && run ufw limit in on "$WAN_IF" to any port 22 proto tcp comment 'SSH admin eth0'
+[[ "$SSH_FROM_WAN" == "yes" ]] && run ufw allow in on "$WAN_IF" from "$CAM_NET" to any port "$CAM_PORT" proto tcp comment 'flux camera (cable PC)'
+if [[ "$SSH_FROM_WAN" == "yes" ]]; then
+  for port in "$HTTPS_PORT" "$HTTP_PORT" "$MQTT_PORT"; do
+    run ufw allow in on "$WAN_IF" from "$CAM_NET" to any port "$port" proto tcp comment 'PC relie par cable'
+  done
+fi
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$MQTT_PORT" proto tcp comment 'MQTTS'
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$HTTPS_PORT" proto tcp comment 'HTTPS proxy'
 run ufw allow in on "$LAN_IF" from "$LAN_NET" to any port "$HTTP_PORT" proto tcp comment 'HTTP -> HTTPS'
@@ -108,6 +116,9 @@ block="# BEGIN SENTINEL-X DOCKER-USER
 -A DOCKER-USER -i $LAN_IF -s $LAN_NET -p tcp -m conntrack --ctorigdstport $HTTP_PORT -j RETURN
 -A DOCKER-USER -i $LAN_IF -s $LAN_NET -p udp -m conntrack --ctorigdstport $NTP_PORT -j RETURN
 -A DOCKER-USER -i $LAN_IF -j DROP
+-A DOCKER-USER -i $WAN_IF -s $CAM_NET -p tcp -m conntrack --ctorigdstport $HTTPS_PORT -j RETURN
+-A DOCKER-USER -i $WAN_IF -s $CAM_NET -p tcp -m conntrack --ctorigdstport $HTTP_PORT -j RETURN
+-A DOCKER-USER -i $WAN_IF -s $CAM_NET -p tcp -m conntrack --ctorigdstport $MQTT_PORT -j RETURN
 -A DOCKER-USER -i $WAN_IF -j DROP
 -A DOCKER-USER -j RETURN
 COMMIT

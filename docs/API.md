@@ -295,9 +295,11 @@ Passe le badge à `active: false`. Il est conservé pour l'historique des passag
 Le corps est **exactement** le message attendu par l'ESP32. Il est validé puis publié sur `sentinel/commands`
 (QoS 1) et journalisé. Le champ `action` détermine le format.
 
+Raccourci superviseur (rôle opérateur) : `POST /api/v1/actuators/move` avec `{"target":"ARM_LEFT","command":"SET_ANGLE","angle":120}` (`target` : `ARM_LEFT`, `ARM_RIGHT`, `HEAD`, `TRAP_REAR`). Réponse 202, ou 422 si l'angle est absent ou hors limites.
+
 | `action` | Champs | Source |
 |---|---|---|
-| `OPERATE_MOTOR` | `target` : `AIRLOCK_MAIN` \| `GAS_VALVE` \| `BARRIER` \| `VENT` ; `command` : `OPEN` \| `CLOSE` \| `STOP` ; `duration_ms` (1–60000, facultatif) | 03_SPECIFICATION § 2.A |
+| `OPERATE_MOTOR` | `target` : `AIRLOCK_MAIN` \| `TRAP_REAR` \| `ARM_LEFT` \| `ARM_RIGHT` \| `HEAD` \| `GAS_VALVE` \| `BARRIER` \| `VENT` ; `command` : `OPEN` \| `CLOSE` \| `STOP` \| `CENTER` \| `SET_ANGLE` ; `angle` (obligatoire avec `SET_ANGLE` : bras 0–180, tête -90–90) ; `duration_ms` (1–60000, facultatif) | 03_SPECIFICATION § 2.A, `docs/CONTRAT-MQTT.md` § 5.1 |
 | `CONTROL_MOTORS` | `commands` : 1 à 6 éléments `{motor_id (0–5, unique), direction: CW\|CCW, angle_deg (1–3600), speed_rpm (1–15)}` | 03_CONTRAT § 3.A |
 | `EMERGENCY_STOP_ALL` | — | 03_CONTRAT § 3.B |
 | `TRIGGER_ALARM` | `state` (booléen) ; `color`, `sound` facultatifs (codes en majuscules, ex. `RED`, `SIREN_ALERT`) | 03_SPECIFICATION § 2.B |
@@ -349,22 +351,35 @@ Historique de tout ce qui a été envoyé à l'ESP32 : commandes et réponses d'
 
 ---
 
+### Enrôlement de badges (page « Badges » du tableau de bord)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| `POST` | `/api/v1/enrollments` | opérateur : démarre le mode écriture de l'ESP32 (`user_name`, `clearance_level`, `auto_unlock_door`, `duration_s` 10-120) ; 409 si un enrôlement est déjà en cours |
+| `GET` | `/api/v1/enrollments/{id}` | état : `PENDING`, `SUCCESS` (avec `card_uid`), `TIMEOUT`, `CANCELLED`, `FAILED` |
+| `DELETE` | `/api/v1/enrollments/{id}` | annule un enrôlement en cours |
+
+Le badge écrit est rattaché automatiquement à l'utilisateur (table `badges`). Détails : `docs/BADGES.md`, topic `sentinel/enroll` : `docs/CONTRAT-MQTT.md` § 4.4.
+
 ## 9. Tableau de bord
 
 `https://192.168.10.1/dashboard/` : page React servie par l'API elle-même, sans conteneur ni ressource externe. Elle
 fonctionne donc sur le Wi-Fi de la table, même sans Internet. Connexion par compte (identifiant + mot de passe, double
 authentification facultative) ; la session est conservée uniquement pour l'onglet (`sessionStorage`).
 
-**Identité** « centre de commandement » : fond bleu nuit, panneaux translucides, accent cyan ; polices Inter, Space
-Grotesk et JetBrains Mono (chiffres) embarquées. Les courbes utilisent un bleu validé pour le fond sombre, les statuts
-gardent leurs couleurs réservées avec icône et libellé.
+**Identité** épurée, inspirée d'Apple : fond gris très clair, cartes blanches à ombres douces, grands arrondis, boutons
+en pilule et un seul accent bleu (`#0071e3`). Mode sombre automatique selon le réglage du système (accent `#0a84ff`).
+Police système (SF Pro sur Apple, Inter embarquée ailleurs). Wall-E est présenté sur fond noir, comme un produit. Interface
+réduite à l'essentiel : boutons d'outils en **icônes** (libellé en info-bulle et pour les lecteurs d'écran). Les courbes
+utilisent un bleu validé pour chaque mode ; les statuts gardent leurs couleurs réservées avec icône et libellé.
 
 | Zone | Contenu |
 |---|---|
-| Barre d'état | sections (touches **1** à **4**), horloges locale et UTC, recherche de commandes **Ctrl-K / ⌘K**, compte connecté |
-| Relevés | température, humidité, gaz, présence : valeur actuelle et plage de la période (Wi-Fi et mémoire de l'ESP dans l'info-bulle de l'état du module) |
-| Commandes | sas, alarme, **arrêt d'urgence en deux clics** (armer puis confirmer sous 5 s) |
-| **Hologramme Wall-E** | modèle 3D en hologramme (React Three Fiber) qui reflète l'état du module : **cyan** nominal, **ambre** présence ou avertissement, **rouge** alerte critique / gaz / surchauffe, **bleu acier** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer (aide affichée au survol). **Caméra IA incrustée en haut à droite** : badge **Live** si le script IA a envoyé une image depuis moins de 15 s, **Offline** sinon ; bouton (ou double-clic) pour l'**agrandir** sur la moitié droite du cadre, Wall-E se décalant à gauche |
+| Barre d'état | sections en icônes, libellé de la section active (touches **1** à **4**), horloge (UTC en info-bulle), thème, recherche de commandes **Ctrl-K / ⌘K**, avatar (ouvre « Mon compte »), déconnexion |
+| Relevés | température, humidité, gaz, présence : valeur actuelle (identifiant, Wi-Fi et mémoire de l'ESP dans l'info-bulle de l'état « En ligne / Hors ligne ») |
+| Commandes | sas (ouvrir / fermer) et alarme (déclencher / couper) en icônes, **arrêt d'urgence en deux clics** (armer puis confirmer sous 5 s) |
+| **Wall-E en 3D** | modèle 3D en couleurs réelles (React Three Fiber, éclairage studio) qui tourne sur son socle. **Animé** : la tête suit le curseur (partout sur la page, tant qu'il bouge), les bras changent de posture selon l'état et Wall-E fait coucou quand on clique dessus ; **la trappe du dos s'ouvre avec le sas** (état réel), ou d'un clic sur la trappe ou sur le bouton cadenas (affichage seulement, rien n'est envoyé au module). L'anneau du socle reflète l'état du module (yeux pulsant en rouge en alerte) : **vert** nominal, **ambre** présence ou avertissement reçu depuis moins de 30 s, **rouge** gaz ou température au-dessus du seuil, ou alerte critique reçue depuis moins de 30 s, **bleu acier** hors ligne. La tête balaie la pièce quand le PIR détecte une présence. Glisser pour pivoter, molette pour zoomer. **Caméra IA incrustée en haut à droite** : badge **Live** si le script IA a envoyé une image depuis moins de 15 s, **Offline** sinon ; bouton (ou double-clic) pour l'**agrandir** sur la moitié droite du cadre, Wall-E se décalant à gauche |
+| **Signalisation d'alerte** | en alerte critique : halo rouge pulsant sur les bords de l'écran, bandeau (cause, valeur, seuil, ancienneté) avec bouton **Acquitter**, son d'alarme en boucle (`dashboard/public/sounds/alarme.mp3`, mono 96 kbit/s ; icône haut-parleur pour le couper, choix mémorisé ; le navigateur peut demander d'activer le son après un rechargement), titre d'onglet « ⚠ ALERTE », vibration sur téléphone. En vigilance (présence, avertissement) : halo et bandeau ambre, sans son. Tout s'arrête quand la situation redevient normale |
 | Flux d'événements | alertes, passages RFID et commandes, fusionnés par ordre chronologique |
 | Courbes | température et humidité à gauche de l'hologramme, gaz et présence à droite. Curseur synchronisé sur les 4 courbes, flèches ← → au clavier |
 | Journal | alertes (filtrables, bouton **Acquitter**), accès RFID, commandes envoyées |
@@ -385,6 +400,22 @@ l'utilisateur : aucune charge pour le Raspberry Pi. Si l'utilisateur demande la 
 système), l'hologramme, le bandeau et les clignotements sont figés.
 
 Code dans [`dashboard/`](../dashboard) (Vite + React + TypeScript). L'image Docker de l'API le compile au build.
+
+**Thèmes visuels.** Un sélecteur dans la barre du haut (et la palette Ctrl-K) change la direction artistique sans
+toucher aux composants ni à leur contenu ; le choix est mémorisé par navigateur. Chaque thème est un dossier
+autonome de `dashboard/src/themes/` (`meta.ts`, `index.tsx`, `theme.css`), chargé seulement quand on le choisit.
+**Supprimer un dossier suffit à retirer le thème** (découverte automatique dans `themes/registry.ts`) ; on peut ensuite
+retirer de `package.json` les paquets qu'il était seul à utiliser.
+
+| Thème | Direction artistique | Outils |
+|---|---|---|
+| Standard (défaut) | épuré façon Apple, clair ou sombre selon le système | — |
+| `aurora/` | dégradé maillé animé, verre dépoli, accents violet-rose, police Sora | Shader Gradient, Motion (`@shadergradient/react`, `@fontsource-variable/sora`) |
+| `blanc/` | façon Apple, tout en blanc et gris clair, toujours clair ; Wall-E sur fond gris clair | aucune dépendance (option `hologram: "light"` du module de thème) |
+| `industriel/` | pupitre d'usine : graphite mat, orange sécurité, coins biseautés, bandes de signalisation | GSAP (`gsap`, `@fontsource/barlow-condensed`, `@fontsource/ibm-plex-mono`) |
+
+Tous fonctionnent hors ligne (aucune ressource externe), respectent « réduire les animations », et gardent les couleurs
+de statut réservées ; la couleur des courbes de chaque thème est validée pour son fond.
 
 ## 10. Développement
 

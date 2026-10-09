@@ -1,9 +1,13 @@
 import { motion } from "motion/react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { download, fetchSnapshot, getJson, postJson, Unauthorized } from "./api";
+import { download, getJson, postJson, Unauthorized } from "./api";
 import type { PaletteCommand } from "./components/CommandPalette";
 import type { HoloMode } from "./components/Hologram";
+import { AlarmLayer, type AlarmLevel, type AlarmReason } from "./components/AlarmLayer";
 import { LineChart, type Point } from "./components/LineChart";
+import { QuickEnroll } from "./Badges";
+import { RobotControl } from "./Robot";
+import { useLiveVideo, usePolling } from "./hooks";
 import { Card, Icon, StatTile, StatusBadge, type Status } from "./components/ui";
 import { ago, dateTime, num } from "./format";
 import type { AccessEvent, Aggregate, Alert, CommandLog, Device, Severity, Telemetry } from "./types";
@@ -17,7 +21,7 @@ const RANGES = [
   { id: "1h", label: "1 h", ms: 3600_000 },
   { id: "6h", label: "6 h", ms: 6 * 3600_000 },
   { id: "24h", label: "24 h", ms: 24 * 3600_000 },
-  { id: "7d", label: "7 jours", ms: 7 * 24 * 3600_000 },
+  { id: "7d", label: "7 j", ms: 7 * 24 * 3600_000 },
 ] as const;
 type RangeId = (typeof RANGES)[number]["id"];
 const LIVE_MS = 1_000;          // état du module + dernière mesure (2 requêtes légères)
@@ -25,6 +29,10 @@ const FULL_REFRESH_MS = 10_000; // courbes agrégées, journal, flux (plus coût
 const ONLINE_WITHIN_MS = 15_000;
 const GAS_HIGH = 614;          // seuil local du firmware (A0 >= 150 sur 1023)
 const TEMP_HIGH = 40;
+// Une alerte colore l'hologramme pendant 30 s après sa réception, puis il revient à l'état réel des capteurs.
+// Les alertes non acquittées restent signalées dans le journal.
+const RECENT_ALERT_MS = 30_000;
+const UNKNOWN_HOLD_MS = 15_000;
 
 const EVENT_LABELS: Record<string, string> = {
   INTRUSION_DETECTED: "Intrusion",
@@ -140,6 +148,9 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
     }
   };
   const acknowledge = (id: number) => run("Acquittement impossible", () => postJson(`/api/v1/alerts/${id}/ack`, token), "Alerte acquittée");
+  const acknowledgeMany = (ids: number[]) => run("Acquittement impossible",
+    () => Promise.all(ids.map((id) => postJson(`/api/v1/alerts/${id}/ack`, token))),
+    ids.length > 1 ? `${ids.length} alertes acquittées` : "Alerte acquittée");
   const triggerAirlock = (state: boolean) => run("Erreur sas",
     () => postJson("/api/v1/actuators/airlock", token, { state, duration_ms: 3000 }),
     `Commande sas ${state ? "OUVERTURE" : "FERMETURE"} transmise`);
@@ -185,24 +196,26 @@ export default function Supervision({ token, canOperate, onExpired, onCommands }
 
         <div className="filters" role="toolbar" aria-label="Filtres">
           <NodeStatus device={data?.device ?? null} now={now} />
+          <span className="spacer" />
           <div className="segmented" role="group" aria-label="Période">
             {RANGES.map((r) => (
               <button key={r.id} aria-pressed={range === r.id} onClick={() => setRange(r.id)}>{r.label}</button>
             ))}
           </div>
-          <label className="check">
-            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Temps réel (1 s)
-          </label>
-          <span className="spacer" />
-          <button className="btn btn-sm btn-ghost" onClick={exportCsv}>Exporter CSV</button>
+          <button className={`icon-btn${auto ? " active" : ""}`} aria-pressed={auto} onClick={() => setAuto((a) => !a)}
+                  aria-label="Temps réel (1 s)" title={auto ? "Temps réel actif : suspendre" : "Temps réel suspendu : reprendre"}>
+            <Icon name={auto ? "pause" : "play"} size={15} />
+          </button>
+          <button className="icon-btn" onClick={exportCsv} aria-label="Exporter la télémétrie (CSV)" title="Exporter CSV">
+            <Icon name="download" size={16} />
+          </button>
         </div>
 
         {data && (
           <Dashboard
-            data={data} online={online} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
-            unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token}
-            onAck={acknowledge} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
+            data={data} online={online} now={now} loading={loading} hoverT={hoverT} setHoverT={setHoverT}
+            unackOnly={unackOnly} setUnackOnly={setUnackOnly} tab={tab} setTab={setTab} canOperate={canOperate} token={token} onExpired={onExpired}
+            onAck={acknowledge} onAckMany={acknowledgeMany} onAirlock={triggerAirlock} onAlarm={triggerAlarm} onEmergencyStop={triggerEmergencyStop}
           />
         )}
       </main>
@@ -230,35 +243,38 @@ function feedItems(data: Data): FeedItem[] {
   return items.sort((x, y) => Date.parse(y.ts) - Date.parse(x.ts));
 }
 
-const CAMERA_POLL_MS = 2_000;
-const CAMERA_MAX_AGE_MS = 15_000;   // au-delà, la dernière image est considérée comme figée : caméra hors ligne
 
 /** Incrustation caméra (coin de l'hologramme) : « Live » si le script IA envoie des images récentes, sinon « Offline ».
  *  L'image est chargée en blob car le jeton ne peut pas passer par un simple <img src>. */
-function CameraInset({ token, expanded, onToggle }: { token: string; expanded: boolean; onToggle: () => void }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [live, setLive] = useState(false);
+function CameraInset({ token, expanded, onToggle, unknown }: { token: string; expanded: boolean; onToggle: () => void; unknown: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [full, setFull] = useState(false);
+  const { live, fps } = useLiveVideo(token, canvasRef);
+  // Plein écran réel du navigateur (Échap pour quitter) ; l'état suit aussi une sortie faite au clavier.
   useEffect(() => {
-    let cancelled = false;
-    const poll = () => fetchSnapshot("/api/v1/vision/snapshot", token, CAMERA_MAX_AGE_MS)
-      .then((r) => {
-        if (cancelled) { if (r.url) URL.revokeObjectURL(r.url); return; }
-        setLive(r.live);
-        setSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return r.url; });
-      })
-      .catch(() => { if (!cancelled) { setLive(false); setSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return null; }); } });
-    poll();
-    const id = setInterval(poll, CAMERA_POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [token]);
+    const sync = () => setFull(document.fullscreenElement === boxRef.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void boxRef.current?.requestFullscreen?.().catch(() => undefined);
+  };
   return (
     // Animation de mise en page (Motion) : la fenêtre grandit depuis son coin. À l'agrandissement elle part
     // avec un léger retard pour que Wall-E prenne de l'avance ; à la réduction elle se rétracte d'abord.
     <motion.div layout transition={{ layout: { duration: 0.5, ease: [0.22, 1, 0.36, 1], delay: expanded ? 0.12 : 0 } }}
-         className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}`}
-         aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={onToggle}>
-      {live && src ? <motion.img layout src={src} alt="Image en direct de la caméra IA" /> : <motion.span layout="position" className="cam-icon"><Icon name="cam" size={expanded ? 34 : 22} /></motion.span>}
-      <motion.span layout="position" className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? "Live" : "Offline"}</motion.span>
+         ref={boxRef} className={`cam-pip ${live ? "is-live" : "is-offline"}${expanded ? " expanded" : ""}${unknown > 0 ? " cam-alert" : ""}`}
+         aria-label={`Caméra IA : ${live ? "en direct" : "hors ligne"}`} onDoubleClick={toggleFull}>
+      <motion.canvas layout ref={canvasRef} aria-label="Image en direct de la caméra IA" style={{ display: live ? "block" : "none" }} />
+      {!live && <motion.span layout="position" className="cam-icon"><Icon name="cam" size={expanded ? 34 : 22} /></motion.span>}
+      <motion.span layout="position" className={`cam-badge ${live ? "live" : "offline"}`}><i aria-hidden />{live ? `Live · ${fps} fps` : "Offline"}</motion.span>
+      {unknown > 0 && <span className="cam-unknown" role="alert"><Icon name="bell" size={14} />{unknown > 1 ? `${unknown} INCONNUS` : "PERSONNE INCONNUE"}</span>}
+      <button type="button" className="cam-toggle cam-full" onClick={toggleFull} aria-pressed={full}
+              title={full ? "Quitter le plein écran" : "Plein écran"} aria-label={full ? "Quitter le plein écran" : "Caméra en plein écran"}>
+        <Icon name={full ? "shrink" : "fullscreen"} size={14} />
+      </button>
       <motion.button layout="position" type="button" className="cam-toggle" onClick={onToggle} aria-pressed={expanded}
               title={expanded ? "Réduire la caméra" : "Agrandir la caméra"} aria-label={expanded ? "Réduire la caméra" : "Agrandir la caméra"}>
         <Icon name={expanded ? "shrink" : "expand"} size={14} />
@@ -270,12 +286,12 @@ function CameraInset({ token, expanded, onToggle }: { token: string; expanded: b
 function NodeStatus({ device, now }: { device: Device | null; now: number }) {
   if (!device) return <span className="node-pill off"><i aria-hidden />Aucun module</span>;
   const online = device.last_seen != null && now - Date.parse(device.last_seen) < ONLINE_WITHIN_MS;
-  const details = [`Dernier signal ${ago(device.last_seen, now)}`,
+  const details = [device.node_id, `Dernier signal ${ago(device.last_seen, now)}`,
     device.last_wifi_rssi_dbm != null ? `Wi-Fi ${device.last_wifi_rssi_dbm} dBm` : null,
     device.last_free_heap_bytes != null ? `RAM libre ${Math.round(device.last_free_heap_bytes / 1024)} Ko` : null].filter(Boolean).join(" · ");
   return (
     <span className={`node-pill ${online ? "on" : "off"}`} title={details}>
-      <i aria-hidden />{device.node_id} · {online ? "En ligne" : `Hors ligne depuis ${ago(device.last_seen, now).replace("il y a ", "")}`}
+      <i aria-hidden />{online ? "En ligne" : "Hors ligne"}
     </span>
   );
 }
@@ -288,10 +304,10 @@ function EmergencyButton({ onConfirm, disabled }: { onConfirm: () => void; disab
     const id = setTimeout(() => setArmed(false), 5000);
     return () => clearTimeout(id);
   }, [armed]);
-  if (!armed) return <button className="btn-emergency" disabled={disabled} onClick={() => setArmed(true)}>ARRÊT D'URGENCE</button>;
+  if (!armed) return <button className="btn-emergency" disabled={disabled} onClick={() => setArmed(true)}>Arrêt d'urgence</button>;
   return (
     <div className="confirm-row" role="group" aria-label="Confirmer l'arrêt d'urgence">
-      <button className="btn-emergency" onClick={() => { setArmed(false); onConfirm(); }} autoFocus>CONFIRMER L'ARRÊT</button>
+      <button className="btn-emergency" onClick={() => { setArmed(false); onConfirm(); }} autoFocus>Confirmer l'arrêt</button>
       <button className="btn btn-sm" onClick={() => setArmed(false)}>Annuler</button>
     </div>
   );
@@ -300,6 +316,7 @@ function EmergencyButton({ onConfirm, disabled }: { onConfirm: () => void; disab
 interface DashboardProps {
   data: Data;
   online: boolean;
+  now: number;
   loading: boolean;
   hoverT: number | null;
   setHoverT: (t: number | null) => void;
@@ -308,19 +325,20 @@ interface DashboardProps {
   tab: JournalTab;
   setTab: (t: JournalTab) => void;
   onAck: (id: number) => void;
+  onAckMany: (ids: number[]) => void;
   onAirlock: (state: boolean) => void;
   onAlarm: (state: boolean) => void;
   onEmergencyStop: () => void;
   canOperate: boolean;
   token: string;
+  onExpired: () => void;
 }
 
 function Dashboard({
-  data, online, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck,
-  onAirlock, onAlarm, onEmergencyStop, canOperate, token,
+  data, online, now, loading, hoverT, setHoverT, unackOnly, setUnackOnly, tab, setTab, onAck, onAckMany,
+  onAirlock, onAlarm, onEmergencyStop, canOperate, token, onExpired,
 }: DashboardProps) {
   const { agg, latest, alerts, access, commands } = data;
-  const s = agg.summary;
   const start = Date.parse(agg.since), end = Date.parse(agg.until), bucketMs = agg.bucket_s * 1000;
   const series = useMemo(() => {
     const pts = (pick: (b: Aggregate["buckets"][number]) => number | null): Point[] =>
@@ -333,20 +351,55 @@ function Dashboard({
     };
   }, [agg]);
   const unack = alerts.filter((a) => !a.acknowledged);
-  const byType = Object.keys(EVENT_LABELS).map((k) => ({ label: EVENT_LABELS[k], value: alerts.filter((a) => a.event_type === k).length }));
   const shownAlerts = (unackOnly ? unack : alerts).slice(0, 100);
-  const granted = access.filter((a) => a.access_granted).length;
   const chartProps = { start, end, bucketMs, hoverT, onHover: setHoverT, height: 170 };
-  const hasRange = s.samples > 0;
   const [camExpanded, setCamExpanded] = useState(false);
+  // Inconnus confirmés par la caméra IA, en direct (l'API ne répond non nul que si le flux est vivant).
+  const [unknownNow, setUnknownNow] = useState(0);
+  const [unknownSeen, setUnknownSeen] = useState<{ n: number; at: number } | null>(null);
+  const pollVision = useCallback(() => {
+    getJson<{ unknown: number }>("/api/v1/vision/status", token).then(
+      (v) => { setUnknownNow(v.unknown); if (v.unknown > 0) setUnknownSeen({ n: v.unknown, at: Date.now() }); },
+      () => setUnknownNow(0));
+  }, [token]);
+  usePolling(pollVision, 1000);
+  // L'état critique tient 15 s après le dernier inconnu vu (il a pu passer rapidement) ; le cadre de la caméra, lui, suit le direct.
+  const [, setHoldTick] = useState(0);
+  useEffect(() => {          // rend la main à l'expiration du maintien, même si rien d'autre ne change à l'écran
+    if (!unknownSeen) return;
+    const id = setTimeout(() => setHoldTick((t) => t + 1), UNKNOWN_HOLD_MS + 100);
+    return () => clearTimeout(id);
+  }, [unknownSeen]);
+  const unknownHold = unknownSeen !== null && Date.now() - unknownSeen.at < UNKNOWN_HOLD_MS;
+  const [preview, setPreview] = useState<HoloMode | null>(null);
   const feed = useMemo(() => feedItems(data).slice(0, 40), [data]);
 
   const gasHigh = (latest?.gas_raw_ppm ?? 0) >= GAS_HIGH;
   const tempHigh = (latest?.temperature_celsius ?? 0) >= TEMP_HIGH;
   const presence = Boolean(online && latest?.presence_detected);
-  const mode: HoloMode = !online ? "offline"
-    : unack.some((a) => a.severity === "CRITICAL") || gasHigh || tempHigh ? "critical"
-    : presence || unack.some((a) => a.severity === "WARNING") ? "warning" : "nominal";
+  // État actuel du module : mesures en direct + alertes très récentes (pas l'historique non acquitté).
+  const recentAlerts = (sev: Severity) => alerts.filter((a) => a.severity === sev && !a.acknowledged
+    && now - Date.parse(a.received_at) < RECENT_ALERT_MS);
+  const recentAlert = (sev: Severity) => recentAlerts(sev).length > 0;
+  const liveMode: HoloMode = unknownHold ? "critical" : !online ? "offline"
+    : gasHigh || tempHigh || recentAlert("CRITICAL") ? "critical"
+    : presence || recentAlert("WARNING") ? "warning" : "nominal";
+  // Aperçu : simulation locale d'un état (rien n'est envoyé à l'ESP ni enregistré), pour démonstration.
+  const mode: HoloMode = preview ?? liveMode;
+
+  // Signalisation plein écran (bandeau, halo, sirène) : même état que l'hologramme.
+  const alarmLevel: AlarmLevel = mode === "critical" ? "critical" : mode === "warning" ? "warning" : null;
+  const alarmAlerts = preview ? [] : alarmLevel === "critical" ? recentAlerts("CRITICAL") : alarmLevel === "warning" ? recentAlerts("WARNING") : [];
+  const alarmReasons: AlarmReason[] = preview
+    ? [{ key: "preview", label: `Simulation de l'état « ${MODE_LABEL[preview]} »`, detail: "aperçu local, aucune donnée réelle" }]
+    : [
+    ...(alarmLevel === "critical" && gasHigh ? [{ key: "gas", label: `Gaz élevé : ${num(latest?.gas_raw_ppm, 0)}`, detail: `seuil ${GAS_HIGH}` }] : []),
+    ...(alarmLevel === "critical" && tempHigh ? [{ key: "temp", label: `Température élevée : ${num(latest?.temperature_celsius)} °C`, detail: `seuil ${TEMP_HIGH} °C` }] : []),
+    ...(alarmLevel === "critical" && unknownHold && unknownSeen ? [{ key: "unknown", label: unknownSeen.n > 1 ? `${unknownSeen.n} personnes inconnues devant la caméra` : "Personne inconnue devant la caméra", detail: unknownNow > 0 ? "en ce moment" : "à l'instant" }] : []),
+    ...(alarmLevel === "warning" && presence ? [{ key: "pir", label: "Présence détectée", detail: "capteur PIR" }] : []),
+    ...alarmAlerts.map((a) => ({ key: `a${a.id}`, label: `${EVENT_LABELS[a.event_type] ?? a.event_type}${a.details ? ` — ${a.details}` : ""}`,
+      detail: `${a.source_sensor ?? a.channel}, ${ago(a.received_at, now)}` })),
+  ];
 
   const tabs: { id: JournalTab; label: string; count: number }[] = [
     { id: "alerts", label: "Alertes", count: unack.length },
@@ -356,6 +409,8 @@ function Dashboard({
 
   return (
     <div className={loading ? "loading" : undefined}>
+      <AlarmLayer level={alarmLevel} reasons={alarmReasons} ackIds={alarmAlerts.map((a) => a.id)}
+                  canOperate={canOperate} onAck={onAckMany} preview={preview !== null} />
       {/* Haut : courbes de part et d'autre de l'hologramme (caméra incrustée en haut à droite) */}
       <div className="control-room">
         <div className="stack charts-col">
@@ -368,27 +423,38 @@ function Dashboard({
         </div>
 
         <div className="holo-col">
-          <Card title="Hologramme · Wall-E MK2" icon="cube" className={`mode-${mode}`}
-                actions={<StatusBadge status={mode === "nominal" ? "good" : mode === "warning" ? "warning" : mode === "critical" ? "critical" : "neutral"}>
-                  {MODE_LABEL[mode]}</StatusBadge>}>
+          <Card title="Wall-E" icon="cube" className={`mode-${mode}`}
+                actions={<>
+                  <div className="preview-switch" role="group" aria-label="Aperçu des états (simulation locale)"
+                       title="Aperçu : simule un état sur cet écran uniquement. Recliquer pour revenir à l'état réel.">
+                    {(["nominal", "warning", "critical"] as const).map((m) => (
+                      <button key={m} type="button" className={`pv-${m}`} aria-pressed={preview === m} title={`Aperçu : ${MODE_LABEL[m]}`}
+                              onClick={() => setPreview((p) => (p === m ? null : m))}>
+                        <i aria-hidden /><span className="sr-only">{MODE_LABEL[m]}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <StatusBadge status={mode === "nominal" ? "good" : mode === "warning" ? "warning" : mode === "critical" ? "critical" : "neutral"}>
+                    {MODE_LABEL[mode]}{preview && " (aperçu)"}</StatusBadge>
+                </>}>
             <div className={`holo flush${camExpanded ? " cam-expanded" : ""}`}>
               {/* La scène 3D se resserre à gauche quand la caméra est agrandie : Wall-E se recentre dans l'espace restant. */}
               <div className="holo-stage">
                 <Suspense fallback={<div className="holo-fallback">Chargement du moteur 3D…</div>}>
-                  <Hologram mode={mode} presence={presence} shifted={camExpanded} />
+                  <Hologram mode={mode} presence={preview ? preview === "warning" : presence} shifted={camExpanded}
+                            sasOpen={Boolean(online && latest?.airlock_open)} />
                 </Suspense>
-                <span className="holo-hint">Glisser pour pivoter · molette pour zoomer</span>
               </div>
-              <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} />
+              <CameraInset token={token} expanded={camExpanded} onToggle={() => setCamExpanded((v) => !v)} unknown={unknownNow} />
             </div>
           </Card>
         </div>
 
         <div className="stack charts-col">
-          <Card title="Gaz (pic)" icon="gas" actions={<span>valeur brute</span>}>
+          <Card title="Gaz" icon="gas">
             <LineChart title="Gaz (pic)" unit="" digits={0} points={series.gas} {...chartProps} />
           </Card>
-          <Card title="Présence" icon="user" actions={<span>% du temps</span>}>
+          <Card title="Présence" icon="user" actions={<span>%</span>}>
             <LineChart title="Présence" unit="%" digits={0} domain={[0, 100]} points={series.presence} {...chartProps} />
           </Card>
         </div>
@@ -398,49 +464,49 @@ function Dashboard({
       <div className="bottom-row">
         <Card title="Relevés" icon="gauge">
           <div className="readouts">
-            <StatTile icon="temp" label="Température" value={num(latest?.temperature_celsius)} unit="°C" tone={tempHigh ? "critical" : "neutral"}
-              detail={hasRange ? `${num(s.temperature_min)} – ${num(s.temperature_max)} °C` : undefined} />
-            <StatTile icon="drop" label="Humidité" value={num(latest?.humidity_percent, 0)} unit="%"
-              detail={hasRange ? `${num(s.humidity_min, 0)} – ${num(s.humidity_max, 0)} %` : undefined} />
-            <StatTile icon="gas" label="Gaz" value={num(latest?.gas_raw_ppm, 0)} tone={gasHigh ? "critical" : "neutral"}
-              detail={hasRange ? `pic ${num(s.gas_max, 0)}` : undefined} />
+            <StatTile icon="temp" label="Température" value={num(latest?.temperature_celsius)} unit="°C" tone={tempHigh ? "critical" : "neutral"} />
+            <StatTile icon="drop" label="Humidité" value={num(latest?.humidity_percent, 0)} unit="%" />
+            <StatTile icon="gas" label="Gaz" value={num(latest?.gas_raw_ppm, 0)} tone={gasHigh ? "critical" : "neutral"} />
             <StatTile icon="user" label="Présence" value={latest?.presence_detected == null ? "—" : latest.presence_detected ? "Oui" : "Non"}
-              tone={presence ? "warning" : "neutral"}
-              detail={hasRange ? `${num((s.presence_ratio ?? 0) * 100, 0)} % du temps` : undefined} />
+              tone={presence ? "warning" : "neutral"} />
           </div>
         </Card>
 
-        <Card title="Commandes" icon="bolt" sub={canOperate ? undefined : "Compte en lecture seule : commandes désactivées."}>
+        <Card title="Commandes" icon="bolt" sub={canOperate ? undefined : "Lecture seule"}>
           <fieldset className="ctl" disabled={!canOperate}>
             <div className="ctl-row">
               <div className="ctl-info"><strong>Sas principal</strong>
                 <span className={`state ${latest?.airlock_open ? "on" : ""}`}>{latest?.airlock_open ? "Ouvert" : "Fermé"}</span></div>
               <div className="ctl-btns">
-                <button className="btn btn-sm" onClick={() => onAirlock(true)}>Ouvrir</button>
-                <button className="btn btn-sm" onClick={() => onAirlock(false)}>Fermer</button>
+                <button className="icon-btn" onClick={() => onAirlock(true)} aria-label="Ouvrir le sas" title="Ouvrir"><Icon name="unlock" size={16} /></button>
+                <button className="icon-btn" onClick={() => onAirlock(false)} aria-label="Fermer le sas" title="Fermer"><Icon name="lock" size={16} /></button>
               </div>
             </div>
             <div className="ctl-row">
               <div className="ctl-info"><strong>Alarme</strong>
                 <span className={`state ${latest?.alarm_active ? "alert" : ""}`}>{latest?.alarm_active ? "Active" : "En veille"}</span></div>
               <div className="ctl-btns">
-                <button className="btn btn-sm btn-danger" onClick={() => onAlarm(true)}>Déclencher</button>
-                <button className="btn btn-sm" onClick={() => onAlarm(false)}>Couper</button>
+                <button className="icon-btn danger" onClick={() => onAlarm(true)} aria-label="Déclencher l'alarme" title="Déclencher"><Icon name="bell" size={16} /></button>
+                <button className="icon-btn" onClick={() => onAlarm(false)} aria-label="Couper l'alarme" title="Couper"><Icon name="bell-off" size={16} /></button>
               </div>
             </div>
             <EmergencyButton onConfirm={onEmergencyStop} disabled={!canOperate} />
           </fieldset>
         </Card>
 
-        <Card title="Flux d'événements" icon="pulse">
+        <RobotControl token={token} onExpired={onExpired} canOperate={canOperate} />
+
+        {canOperate && <QuickEnroll token={token} onExpired={onExpired} />}
+
+        <Card title="Événements" icon="pulse">
           <ul className="feed" aria-label="Derniers événements">
             {feed.map((f) => (
               <li key={f.key} className={`lvl-${f.level}`}>
                 <time dateTime={f.ts}>{new Date(f.ts).toLocaleTimeString("fr-FR")}</time>
-                <div><div className="src">{f.src}</div><div className="msg">{f.level === "critical" ? "✕ " : f.level === "warning" ? "▲ " : ""}{f.msg}</div></div>
+                <div title={f.src}><div className="msg">{f.level === "critical" ? "✕ " : f.level === "warning" ? "▲ " : ""}{f.msg}</div></div>
               </li>
             ))}
-            {!feed.length && <li className="empty">Aucun événement sur la période</li>}
+            {!feed.length && <li className="empty">Aucun événement</li>}
           </ul>
         </Card>
       </div>
@@ -457,15 +523,13 @@ function Dashboard({
         {tab === "alerts" && (
           <div>
             <div className="log-tools">
-              <div className="pills">
-                {byType.map((b) => <span className="pill" key={b.label}>{b.label}<b>{b.value}</b></span>)}
-              </div>
+              <span />
               <label className="check"><input type="checkbox" checked={unackOnly} onChange={(e) => setUnackOnly(e.target.checked)} />
-                Non acquittées uniquement</label>
+                Non acquittées</label>
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Heure</th><th>Gravité</th><th>Type</th><th>Capteur</th><th className="num">Valeur</th><th>Détails</th><th>Canal</th><th /></tr></thead>
+                <thead><tr><th>Heure</th><th>Gravité</th><th>Type</th><th>Capteur</th><th className="num">Valeur</th><th>Détails</th><th /></tr></thead>
                 <tbody>
                   {shownAlerts.map((a) => (
                     <tr key={a.id}>
@@ -475,12 +539,12 @@ function Dashboard({
                       <td>{a.source_sensor ?? "—"}</td>
                       <td className="num">{num(a.value, 1)}</td>
                       <td>{a.details ?? "—"}</td>
-                      <td className="muted">{a.channel}</td>
-                      <td>{a.acknowledged ? <span className="muted">Acquittée</span>
-                        : <button className="btn btn-sm" disabled={!canOperate} onClick={() => onAck(a.id)}>Acquitter</button>}</td>
+                      <td className="num">{a.acknowledged ? <span className="muted" title="Acquittée"><Icon name="check" size={15} /></span>
+                        : <button className="icon-btn" disabled={!canOperate} onClick={() => onAck(a.id)} aria-label="Acquitter" title="Acquitter">
+                            <Icon name="check" size={15} /></button>}</td>
                     </tr>
                   ))}
-                  {!shownAlerts.length && <tr><td colSpan={8} className="muted">Aucune alerte</td></tr>}
+                  {!shownAlerts.length && <tr><td colSpan={7} className="muted">Aucune alerte</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -488,7 +552,6 @@ function Dashboard({
         )}
         {tab === "access" && (
           <div>
-            <p className="sub" style={{ marginTop: 0 }}>{access.length} passage(s) : {granted} accordé(s), {access.length - granted} refusé(s)</p>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Heure</th><th>Badge</th><th>Agent</th><th>Porte</th><th>Décision</th></tr></thead>

@@ -55,3 +55,5 @@ DB_POOL_MAX = int(os.environ.get("DB_POOL_MAX", "4"))
 TOPIC_ACCESS = "sentinel/access"
 TOPIC_ACCESS_RESPONSE = "sentinel/access/response"
 TOPIC_COMMANDS = "sentinel/commands"
+TOPIC_TELEMETRY = "sentinel/telemetry"
+TOPIC_ENROLL = "sentinel/enroll"          # ESP32 -> API : résultat d'un enrôlement de badge

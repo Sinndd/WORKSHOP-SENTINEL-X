@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from . import config
 from .db import SQL_ENSURE_DEVICE, pool
-from .models import AccessScan, resolve_ts
+from .models import AccessScan, EnrollResult, resolve_ts
 
 log = logging.getLogger("api.mqtt")
 
@@ -45,6 +45,8 @@ class MqttBridge:
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="access")
+        self.actuators: dict = {}      # dernières positions reçues dans la télémétrie (bras, tête, trappe)
+        self.actuators_at: float | None = None
 
     # --- Cycle de vie ---------------------------------------------------------------
     def start(self):
@@ -68,13 +70,32 @@ class MqttBridge:
             return
         log.info("connecté à mqtts://%s:%d", config.MQTT_HOST, config.MQTT_PORT)
         client.subscribe(config.TOPIC_ACCESS, qos=1)
+        client.subscribe(config.TOPIC_ENROLL, qos=1)
+        client.subscribe(config.TOPIC_TELEMETRY, qos=0)
 
     def _on_disconnect(self, _client, _userdata, _flags, reason_code, _props):
         log.warning("déconnecté du broker (%s), reconnexion automatique", reason_code)
 
     def _on_message(self, _client, _userdata, msg):
         received_at = datetime.now(timezone.utc)
-        self.worker.submit(self._safe_handle_access, msg.payload, received_at)
+        if msg.topic == config.TOPIC_TELEMETRY:
+            self._remember_actuators(msg.payload, received_at)
+        elif msg.topic == config.TOPIC_ENROLL:
+            self.worker.submit(self._safe_handle_enroll, msg.payload)
+        else:
+            self.worker.submit(self._safe_handle_access, msg.payload, received_at)
+
+    def _remember_actuators(self, payload: bytes, received_at: datetime):
+        """Garde en mémoire les positions des actionneurs pour GET /actuators/state (le tableau de bord s'y recale)."""
+        try:
+            state = json.loads(payload).get("actuators_state") or {}
+        except (ValueError, AttributeError):
+            return
+        keys = ("arm_left_deg", "arm_right_deg", "head_deg", "trap_pos_percent")
+        found = {k: state[k] for k in keys if isinstance(state.get(k), (int, float)) and not isinstance(state.get(k), bool)}
+        if found:
+            self.actuators = found
+            self.actuators_at = received_at.timestamp()
 
     # --- Publication --------------------------------------------------------------------
     def publish(self, topic: str, payload: dict, action: str | None) -> int:
@@ -123,6 +144,44 @@ class MqttBridge:
         }
         self.publish(config.TOPIC_ACCESS_RESPONSE, response, "ACCESS_RESPONSE")
         log.info("badge %s sur %s : accès %s", scan.card_uid, scan.node_id, "ACCORDÉ" if granted else "REFUSÉ")
+
+
+    # --- Résultat d'un enrôlement de badge (sentinel/enroll) ------------------------------------------
+    def _safe_handle_enroll(self, payload: bytes):
+        try:
+            self.handle_enroll(payload)
+        except Exception:
+            log.exception("échec du traitement d'un résultat d'enrôlement")
+
+    def handle_enroll(self, payload: bytes):
+        try:
+            res = EnrollResult.model_validate_json(payload)
+        except ValidationError as exc:
+            log.warning("rejeté sentinel/enroll: %s | %r", exc.errors(include_url=False), payload[:200])
+            return
+        with pool.connection() as conn, conn.transaction():
+            conn.execute("UPDATE badge_enrollments SET status = 'TIMEOUT', finished_at = now() "
+                         "WHERE status = 'PENDING' AND expires_at < now()")
+            enr = conn.execute("SELECT * FROM badge_enrollments WHERE id = %s FOR UPDATE", (res.enroll_id,)).fetchone()
+            if enr is None or enr["status"] != "PENDING":
+                log.warning("résultat d'enrôlement %s ignoré (inconnu ou déjà terminé)", res.enroll_id)
+                return
+            if res.status == "ATTEMPT_FAILED":      # un badge a échoué : on reste en attente d'un autre
+                conn.execute("UPDATE badge_enrollments SET error = %s WHERE id = %s", ((res.error or "échec")[:200], res.enroll_id))
+            elif res.status == "SUCCESS" and res.card_uid:
+                conn.execute(
+                    """INSERT INTO badges (card_uid, user_name, clearance_level, auto_unlock_door, active)
+                       VALUES (%s, %s, %s, %s, true)
+                       ON CONFLICT (card_uid) DO UPDATE SET user_name = EXCLUDED.user_name,
+                         clearance_level = EXCLUDED.clearance_level, auto_unlock_door = EXCLUDED.auto_unlock_door,
+                         active = true, updated_at = now()""",
+                    (res.card_uid, enr["user_name"], enr["clearance_level"], enr["auto_unlock_door"]))
+                conn.execute("UPDATE badge_enrollments SET status = 'SUCCESS', card_uid = %s, error = NULL, finished_at = now() "
+                             "WHERE id = %s", (res.card_uid, res.enroll_id))
+                log.info("badge %s enrôlé pour %s", res.card_uid, enr["user_name"])
+            else:
+                conn.execute("UPDATE badge_enrollments SET status = %s, error = %s, finished_at = now() WHERE id = %s",
+                             ("CANCELLED" if res.status == "CANCELLED" else "TIMEOUT", (res.error or "")[:200] or None, res.enroll_id))
 
 
 bridge = MqttBridge()

@@ -18,7 +18,7 @@
 
 | Compte | Utilisé par | Publie | S'abonne |
 |---|---|---|---|
-| `esp32` | module ESP32 | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/access` | `sentinel/commands`, `sentinel/access/response` |
+| `esp32` | module ESP32 | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/access`, `sentinel/enroll` | `sentinel/commands`, `sentinel/access/response` |
 | `ingestor` | ingestion → PostgreSQL | — | `sentinel/telemetry`, `sentinel/alerts`, `sentinel/vision/events` |
 | `api` | API REST | `sentinel/commands`, `sentinel/access/response` | `sentinel/#` |
 | `vision` | script IA caméra | `sentinel/vision/events` | — |
@@ -31,6 +31,7 @@
 | `sentinel/alerts` | ESP32 → serveur | 1 | sur événement | ingestor (aussi possible en `POST /api/v1/alerts`) |
 | `sentinel/access` | ESP32 → serveur | 1 | à chaque badge | API (décision d'accès) |
 | `sentinel/access/response` | serveur → ESP32 | 1 | en réponse à `sentinel/access` | firmware |
+| `sentinel/enroll` | ESP32 → serveur | 0 | pendant un enrôlement de badge | API (§ 4.4) |
 | `sentinel/commands` | serveur → ESP32 | 1 | sur ordre (`POST /api/v1/commands`) | firmware |
 | `sentinel/vision/events` | script IA → serveur | 1 | sur détection | ingestor |
 
@@ -123,18 +124,43 @@ La trame minimale réellement émise par le firmware `04` est acceptée :
 L'API vérifie que le badge est enregistré et actif (`PUT /api/v1/badges/{uid}`), journalise le passage et répond
 sur `sentinel/access/response` (§ 5.2) en moins d'une seconde.
 
+### 4.4 `sentinel/enroll` — résultat d'un enrôlement de badge
+
+Émis par l'ESP32 après un ordre `ENROLL_BADGE` (§ 5.3). L'API rattache alors le badge à l'utilisateur de la demande.
+
+| Champ | Type | Obligatoire | Valeurs |
+|---|---|---|---|
+| `node_id` | chaîne | oui | |
+| `enroll_id` | entier ≥ 1 | oui | celui de l'ordre reçu |
+| `status` | chaîne | oui | `SUCCESS` (badge écrit), `ATTEMPT_FAILED` (un badge a échoué, le mode écriture continue), `TIMEOUT`, `CANCELLED` |
+| `card_uid` | chaîne | si `SUCCESS` | comme § 4.3 |
+| `error` | chaîne | non | 200 car. max |
+
+```json
+{"node_id":"SENTINEL-X-CORE","enroll_id":12,"status":"SUCCESS","card_uid":"43:4B:51:07"}
+```
+
 ## 5. Messages reçus par l'ESP32
 
 ### 5.1 `sentinel/commands` (QoS 1)
 
 Les messages sont publiés par l'API (`POST /api/v1/commands`) après validation. Le champ `action` détermine le format.
 
-**`OPERATE_MOTOR`** (03_SPECIFICATION § 2.A) : `target` ∈ `AIRLOCK_MAIN` (moteur 1), `GAS_VALVE` (moteur 2),
-`BARRIER` (moteur 3), `VENT` (moteur 4) ; `command` ∈ `OPEN`, `CLOSE`, `STOP` ; `duration_ms` (1–60000) facultatif.
+**`OPERATE_MOTOR`** : `target` ∈ `TRAP_REAR` (trappe arrière, servo ; `AIRLOCK_MAIN` est son alias, c'est la trappe des badges),
+`ARM_LEFT`, `ARM_RIGHT` (servos, 0 à 180°), `HEAD` (28BYJ-48 via MCP23017, -90 à +90° autour de la position de démarrage).
+`command` ∈ `OPEN`, `CLOSE` (trappe), `SET_ANGLE` (bras, tête : champ `angle` obligatoire), `CENTER` (bras, tête : position de repos), `STOP` ;
+`duration_ms` (1–60000) facultatif pour `OPEN`. Les mouvements sont lissés (150°/s maximum). Les butées mécaniques sont dans `config.h`
+(`ARM_MIN_DEG`, `ARM_MAX_DEG`, `TRAP_CLOSED_DEG`, `TRAP_OPEN_DEG`). `GAS_VALVE`, `BARRIER` et `VENT` sont acceptés par l'API mais ignorés par le firmware.
 
 ```json
-{"action":"OPERATE_MOTOR","target":"AIRLOCK_MAIN","command":"OPEN","duration_ms":3000}
+{"action":"OPERATE_MOTOR","target":"TRAP_REAR","command":"OPEN","duration_ms":3000}
+{"action":"OPERATE_MOTOR","target":"ARM_LEFT","command":"SET_ANGLE","angle":120}
+{"action":"OPERATE_MOTOR","target":"HEAD","command":"SET_ANGLE","angle":-45}
+{"action":"OPERATE_MOTOR","target":"HEAD","command":"CENTER"}
 ```
+
+La télémétrie renvoie les positions dans `actuators_state` : `arm_left_deg`, `arm_right_deg`, `head_deg`, `trap_pos_percent`
+(champs facultatifs, ignorés par l'API actuelle). `EMERGENCY_STOP_ALL` fige les bras, la tête et la trappe.
 
 **`CONTROL_MOTORS`** (03_CONTRAT § 3.A) : 1 à 6 ordres simultanés. `motor_id` vaut de 0 à 5 et doit être unique dans le
 message. `direction` vaut `CW` ou `CCW`, `angle_deg` de 1 à 3600, `speed_rpm` de 1 à 15 (maximum du 28BYJ-48).
@@ -159,6 +185,18 @@ majuscules, chiffres et `_`, 32 caractères max.
 ```
 
 L'ESP32 doit ignorer toute action inconnue. L'exécution réelle se constate dans la télémétrie suivante (`actuators_state`).
+
+### 5.3 Ordres d'enrôlement (`sentinel/commands`, QoS 1)
+
+Publiés par l'API (`POST /api/v1/enrollments`, depuis la page « Badges » du tableau de bord), jamais par `POST /api/v1/commands`.
+
+```json
+{"action":"ENROLL_BADGE","enroll_id":12,"duration_s":30}
+{"action":"ENROLL_CANCEL","enroll_id":12}
+```
+
+`ENROLL_BADGE` : l'ESP32 passe en mode écriture pendant `duration_s` secondes (10 à 120) et écrit le premier badge présenté (cf. `docs/BADGES.md`) ;
+il répond sur `sentinel/enroll` (§ 4.4). `ENROLL_CANCEL` le fait quitter ce mode.
 
 ### 5.2 `sentinel/access/response` (QoS 1)
 

@@ -40,6 +40,9 @@ else
   echo -e "${GREEN}[1/4] Fichier .env présent et vérifié (mode 600).${NC}"
 fi
 
+# Refus des secrets déjà publiés dans l'historique Git
+./scripts/check-secrets.sh
+
 # 3. Génération de l'autorité de certification et des certificats TLS
 if [[ ! -f mosquitto/certs/ca.crt || ! -f mosquitto/certs/server.crt ]]; then
   echo -e "${YELLOW}[2/4] Création de la PKI interne et des certificats TLS MQTTS...${NC}"

@@ -1,6 +1,6 @@
 import { useCallback, useState, type FormEvent } from "react";
 import { getJson, send } from "./api";
-import { Card } from "./components/ui";
+import { Card, Icon } from "./components/ui";
 import { dateTime } from "./format";
 import { useAction, usePolling } from "./hooks";
 import type { Me, SessionRow } from "./types";
@@ -56,9 +56,6 @@ export function PasswordForm({ token, username, onDone, onExpired }:
       <button className="btn btn-primary" type="submit" disabled={busy || hints.some((h) => !h.ok)}>
         {busy ? "Enregistrement…" : "Changer le mot de passe"}
       </button>
-      <p className="sub" style={{ marginTop: 8 }}>
-        Les autres sessions ouvertes avec ce compte seront fermées.
-      </p>
     </form>
   );
 }
@@ -89,7 +86,7 @@ function TwoFactor({ token, me, onChanged, onExpired }:
   };
 
   return (
-    <Card title="Double authentification (TOTP)" sub="Code à 6 chiffres généré par une application (Google Authenticator, Aegis, 1Password…)">
+    <Card title="Double authentification (TOTP)">
       {error && <div className="alert-banner error-banner" role="alert">{error}</div>}
       {notice && <div className="alert-banner success-banner" role="status">{notice}</div>}
       {me.totp_enabled ? (
@@ -145,7 +142,7 @@ function MySessions({ token, onExpired }: { token: string; onExpired: () => void
   };
 
   return (
-    <Card title="Mes sessions actives" sub="Connexions ouvertes avec ce compte (une session inconnue ? fermez-la et changez de mot de passe)">
+    <Card title="Mes sessions actives">
       {error && <div className="alert-banner error-banner" role="alert">{error}</div>}
       {notice && <div className="alert-banner success-banner" role="status">{notice}</div>}
       <div className="table-wrap">
@@ -159,7 +156,7 @@ function MySessions({ token, onExpired }: { token: string; onExpired: () => void
                 <td className="mono">{s.ip ?? "—"}</td>
                 <td className="ua" title={s.user_agent ?? ""}>{s.user_agent ?? "—"}</td>
                 <td>{s.current ? <span className="muted">session actuelle</span>
-                  : <button className="btn btn-sm" onClick={() => revoke(s.id)}>Fermer</button>}</td>
+                  : <button className="icon-btn" onClick={() => revoke(s.id)} aria-label="Fermer la session" title="Fermer la session"><Icon name="logout" size={15} /></button>}</td>
               </tr>
             ))}
             {!rows.length && <tr><td colSpan={5} className="muted">Aucune session</td></tr>}

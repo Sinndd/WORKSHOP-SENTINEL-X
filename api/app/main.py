@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from . import auth, config
 from .auth_routes import router as auth_router
 from .db import pool
+from .faces import router as faces_router
 from .mqtt_bridge import bridge
 from .routes import router
 
@@ -55,6 +56,7 @@ app = FastAPI(
 )
 app.include_router(router)
 app.include_router(auth_router)
+app.include_router(faces_router)
 
 
 @app.get("/health", tags=["supervision"])
@@ -89,12 +91,13 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 MAX_BODY = 64 * 1024                     # JSON : 64 Kio ; seul le snapshot webcam peut aller jusqu'à 2 Mio
 MAX_BODY_SNAPSHOT = 2 * 1024 * 1024 + 1024
+BIG_BODY_PATHS = {"/api/v1/vision/snapshot", "/api/v1/faces/enrollments/photo"}   # images : jusqu'à 2 Mio
 
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     if request.method in ("POST", "PUT", "PATCH"):
-        limit = MAX_BODY_SNAPSHOT if request.url.path == "/api/v1/vision/snapshot" else MAX_BODY
+        limit = MAX_BODY_SNAPSHOT if request.url.path in BIG_BODY_PATHS else MAX_BODY
         length = request.headers.get("content-length")
         if length is None and "chunked" in request.headers.get("transfer-encoding", "").lower():
             return JSONResponse({"detail": "Content-Length requis"}, status_code=411)
@@ -115,4 +118,10 @@ async def security_headers(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     if request.url.path.startswith("/dashboard"):
         response.headers["Content-Security-Policy"] = CSP
+        # Fichiers de build à nom haché : immuables. Le reste (index.html, modèle 3D) est revalidé à chaque
+        # chargement (ETag -> 304) pour qu'une nouvelle version soit vue sans vider le cache du navigateur.
+        if request.url.path.startswith("/dashboard/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "no-cache"
     return response

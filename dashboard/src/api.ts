@@ -35,6 +35,11 @@ export async function send<T = void>(method: "POST" | "PATCH" | "PUT" | "DELETE"
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+/** Envoie une image brute (corps = fichier) ; l'API lit le reste dans l'URL. */
+export async function uploadImage<T>(path: string, token: string, image: Blob): Promise<T> {
+  return (await request(path, token, { method: "POST", body: image, headers: { "Content-Type": image.type || "image/jpeg" } })).json() as Promise<T>;
+}
+
 export const postJson = <T>(path: string, token: string, body?: unknown) => send<T>("POST", path, token, body);
 
 export interface Session {
@@ -83,4 +88,40 @@ export async function fetchSnapshot(path: string, token: string, maxAgeMs: numbe
   const live = (res.headers.get("content-type") ?? "").includes("jpeg") && Number.isFinite(ts) && Date.now() - ts < maxAgeMs;
   if (!live) return { url: null, live: false };
   return { url: URL.createObjectURL(await res.blob()), live: true };
+}
+
+const CRLF2 = [13, 10, 13, 10];
+function indexOfCrlf2(buf: Uint8Array): number {
+  for (let i = 0; i + 3 < buf.length; i++) if (buf[i] === 13 && buf[i + 1] === 10 && buf[i + 2] === 13 && buf[i + 3] === 10) return i;
+  return -1;
+}
+
+/** Flux vidéo MJPEG (multipart/x-mixed-replace) authentifié : produit chaque image JPEG au fur et à mesure de son arrivée. */
+export async function* mjpegFrames(path: string, token: string, signal: AbortSignal): AsyncGenerator<Uint8Array> {
+  const res = await request(path, token, { signal });
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  let buf: Uint8Array = new Uint8Array(0);
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      const merged = new Uint8Array(buf.length + value.length);
+      merged.set(buf); merged.set(value, buf.length);
+      buf = merged;
+      for (;;) {
+        const head = indexOfCrlf2(buf);
+        if (head < 0) break;
+        const len = Number(/content-length:\s*(\d+)/i.exec(decoder.decode(buf.subarray(0, head)))?.[1] ?? NaN);
+        if (!Number.isFinite(len)) { buf = buf.slice(head + CRLF2.length); continue; }
+        const start = head + CRLF2.length;
+        if (buf.length < start + len) break;                 // image incomplète : on attend la suite
+        yield buf.slice(start, start + len);
+        buf = buf.slice(start + len);
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => undefined);
+  }
 }

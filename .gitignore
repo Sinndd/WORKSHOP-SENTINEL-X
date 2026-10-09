@@ -39,3 +39,6 @@ sentinel-offline-*.tar.gz.sha256
 .venv-yolo/
 data/
 yolov8n.pt
+
+# Environnement Python de la chaîne vision/IA (scripts/setup-vision.sh)
+.venv-vision/

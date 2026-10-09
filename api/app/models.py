@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from . import config
 
@@ -71,11 +71,43 @@ class AccessScan(Strict):
 
 
 # --- Commandes envoyées à l'ESP32 (topic sentinel/commands) -----------------------------
+MotorTarget = Literal["AIRLOCK_MAIN", "TRAP_REAR", "ARM_LEFT", "ARM_RIGHT", "HEAD", "GAS_VALVE", "BARRIER", "VENT"]
+
+
 class OperateMotor(Strict):
-    """03_SPECIFICATION § 2.A."""
+    """03_SPECIFICATION § 2.A, étendue : trappe arrière (TRAP_REAR = AIRLOCK_MAIN), bras (ARM_LEFT/RIGHT, 0..180°)
+    et tête (HEAD, -90..90°). SET_ANGLE exige "angle" ; CENTER ramène à la position de repos."""
     action: Literal["OPERATE_MOTOR"]
-    target: Literal["AIRLOCK_MAIN", "GAS_VALVE", "BARRIER", "VENT"]
-    command: Literal["OPEN", "CLOSE", "STOP"]
+    target: MotorTarget
+    command: Literal["OPEN", "CLOSE", "STOP", "CENTER", "SET_ANGLE"]
+    duration_ms: Annotated[int, Field(ge=1, le=60_000)] | None = None
+    angle: Annotated[int, Field(ge=-90, le=180)] | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> "OperateMotor":
+        moves = {"ARM_LEFT", "ARM_RIGHT", "HEAD"}
+        if self.command == "SET_ANGLE":
+            if self.target not in moves:
+                raise ValueError("SET_ANGLE n'est valable que pour ARM_LEFT, ARM_RIGHT et HEAD")
+            if self.angle is None:
+                raise ValueError("angle est obligatoire avec SET_ANGLE")
+            lo, hi = (-90, 90) if self.target == "HEAD" else (0, 180)
+            if not lo <= self.angle <= hi:
+                raise ValueError(f"angle doit être compris entre {lo} et {hi} pour {self.target}")
+        elif self.angle is not None:
+            raise ValueError("angle n'est accepté qu'avec SET_ANGLE")
+        if self.command == "CENTER" and self.target not in moves:
+            raise ValueError("CENTER n'est valable que pour ARM_LEFT, ARM_RIGHT et HEAD")
+        if self.command in ("OPEN", "CLOSE") and self.target in moves:
+            raise ValueError("OPEN/CLOSE ne s'applique pas aux bras ni à la tête : utiliser SET_ANGLE ou CENTER")
+        return self
+
+
+class MoveAction(Strict):
+    """Raccourci superviseur : POST /actuators/move."""
+    target: Literal["ARM_LEFT", "ARM_RIGHT", "HEAD", "TRAP_REAR"]
+    command: Literal["SET_ANGLE", "CENTER", "STOP", "OPEN", "CLOSE"]
+    angle: Annotated[int, Field(ge=-90, le=180)] | None = None
     duration_ms: Annotated[int, Field(ge=1, le=60_000)] | None = None
 
 
@@ -153,7 +185,37 @@ class BadgeIn(Strict):
     active: bool = True
 
 
+class EnrollIn(Strict):
+    """Demande d'enrôlement : l'ESP32 passe en mode écriture, le premier badge présenté est rattaché à user_name."""
+    user_name: Annotated[str, Field(min_length=1, max_length=128)]
+    clearance_level: Annotated[str, Field(min_length=1, max_length=64)] = "LEVEL_1"
+    auto_unlock_door: bool = True
+    duration_s: Annotated[int, Field(ge=10, le=120)] = 30
+
+
+class EnrollResult(Strict):
+    """Message de l'ESP32 sur sentinel/enroll."""
+    node_id: NodeId
+    enroll_id: Annotated[int, Field(ge=1)]
+    status: Literal["SUCCESS", "ATTEMPT_FAILED", "TIMEOUT", "CANCELLED"]
+    card_uid: CardUid | None = None
+    error: Annotated[str, Field(max_length=200)] | None = None
+
+
 # --- Réponses ---------------------------------------------------------------------------
+class EnrollmentOut(BaseModel):
+    id: int
+    user_name: str
+    clearance_level: str
+    auto_unlock_door: bool
+    status: str
+    card_uid: str | None
+    error: str | None
+    created_at: datetime
+    expires_at: datetime
+    finished_at: datetime | None
+
+
 class AlertOut(BaseModel):
     id: int
     node_id: str

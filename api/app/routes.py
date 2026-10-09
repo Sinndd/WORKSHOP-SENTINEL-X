@@ -1,17 +1,20 @@
 """Endpoints REST /api/v1 (contrat : docs/CONTRAT-MQTT.md, détail : docs/API.md, interactif : /docs)."""
+import asyncio
 import math
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import Response as RawResponse, StreamingResponse
 from psycopg import sql
+from pydantic import ValidationError
 from psycopg.types.json import Jsonb
 
 from . import config
 from .db import SQL_ENSURE_DEVICE, pool
-from .models import (CARD_UID_RE, AccessEventOut, AirlockAction, AlarmAction, AlertIn, AlertOut, BadgeIn, BadgeOut,
-                     Command, CommandOut, DeviceOut, Severity, TelemetryAggregate,
+from .models import (CARD_UID_RE, AccessEventOut, AirlockAction, AlarmAction, MoveAction, OperateMotor, AlertIn, AlertOut, BadgeIn, BadgeOut,
+                     Command, CommandOut, DeviceOut, EnrollIn, EnrollmentOut, Severity, TelemetryAggregate,
                      TelemetryOut, VisionEventOut, resolve_ts)
 from .mqtt_bridge import bridge
 from .auth import client_ip, rate_limited, require_device_or_operator, require_operator, require_viewer
@@ -19,6 +22,27 @@ from .auth import client_ip, rate_limited, require_device_or_operator, require_o
 # Tampon mémoire RAM pour le dernier snapshot webcam (aucun impact I/O sur carte SD)
 _latest_snapshot: bytes | None = None
 _latest_snapshot_ts: datetime | None = None
+_unknown_now = 0                       # nombre d'inconnus confirmés, annoncé par le script de vision avec chaque image
+
+# Relais vidéo : chaque image reçue est diffusée en direct aux flux MJPEG ouverts (GET /vision/stream).
+# Une file d'une ou deux images par spectateur : un client lent perd des images au lieu de retarder les autres.
+_viewers: set[asyncio.Queue] = set()
+_last_frame_seq = 0      # numéro de séquence de la dernière image diffusée (envois parallèles : une image en retard est ignorée)
+MAX_VIEWERS = 8
+
+
+def _publish_frame(jpeg: bytes) -> None:
+    for q in list(_viewers):
+        if q.full():
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        q.put_nowait(jpeg)
+
+
+def _mjpeg_part(jpeg: bytes) -> bytes:
+    return b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(jpeg) + jpeg + b"\r\n"
 
 router = APIRouter(prefix="/api/v1")
 operator = [Depends(require_operator)]
@@ -211,6 +235,61 @@ def revoke_badge(card_uid: CardUidPath):
     return row
 
 
+# --- Enrôlement de badges (mode écriture de l'ESP32 piloté depuis le tableau de bord) ----------------
+SQL_EXPIRE_ENROLLMENTS = "UPDATE badge_enrollments SET status = 'TIMEOUT', finished_at = now() WHERE status = 'PENDING' AND expires_at < now()"
+
+
+@router.post("/enrollments", status_code=202, response_model=EnrollmentOut, tags=["accès RFID"], dependencies=operator)
+def start_enrollment(req: EnrollIn):
+    """Demande l'enrôlement d'un badge : l'ESP32 passe en mode écriture pendant `duration_s` secondes ; le premier badge
+    présenté est écrit puis rattaché à `user_name` (badge actif, voir GET /enrollments/{id}). Un seul enrôlement à la fois."""
+    with pool.connection() as conn, conn.transaction():
+        conn.execute(SQL_EXPIRE_ENROLLMENTS)
+        if conn.execute("SELECT 1 FROM badge_enrollments WHERE status = 'PENDING'").fetchone():
+            raise HTTPException(409, "un enrôlement est déjà en cours : l'annuler ou attendre sa fin")
+        row = conn.execute(
+            """INSERT INTO badge_enrollments (user_name, clearance_level, auto_unlock_door, expires_at)
+               VALUES (%s, %s, %s, now() + make_interval(secs => %s)) RETURNING *""",
+            (req.user_name.strip(), req.clearance_level, req.auto_unlock_door, req.duration_s)).fetchone()
+    try:
+        bridge.publish(config.TOPIC_COMMANDS, {"action": "ENROLL_BADGE", "enroll_id": row["id"], "duration_s": req.duration_s},
+                       "ENROLL_BADGE")
+    except RuntimeError as exc:
+        with pool.connection() as conn:
+            conn.execute("UPDATE badge_enrollments SET status = 'FAILED', error = %s, finished_at = now() WHERE id = %s",
+                         (str(exc)[:200], row["id"]))
+        raise HTTPException(503, str(exc)) from None
+    return row
+
+
+@router.get("/enrollments/{enroll_id}", response_model=EnrollmentOut, tags=["accès RFID"], dependencies=operator)
+def get_enrollment(enroll_id: Annotated[int, Path(ge=1)]):
+    with pool.connection() as conn:
+        conn.execute(SQL_EXPIRE_ENROLLMENTS)
+        row = conn.execute("SELECT * FROM badge_enrollments WHERE id = %s", (enroll_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "enrôlement inconnu")
+    return row
+
+
+@router.delete("/enrollments/{enroll_id}", response_model=EnrollmentOut, tags=["accès RFID"], dependencies=operator)
+def cancel_enrollment(enroll_id: Annotated[int, Path(ge=1)]):
+    """Annule un enrôlement en cours (l'ESP32 quitte le mode écriture)."""
+    with pool.connection() as conn:
+        row = conn.execute("""UPDATE badge_enrollments SET status = 'CANCELLED', finished_at = now()
+                              WHERE id = %s AND status = 'PENDING' RETURNING *""", (enroll_id,)).fetchone()
+        if row is None:
+            existing = conn.execute("SELECT * FROM badge_enrollments WHERE id = %s", (enroll_id,)).fetchone()
+            if existing is None:
+                raise HTTPException(404, "enrôlement inconnu")
+            return existing   # déjà terminé : rien à annuler
+    try:
+        bridge.publish(config.TOPIC_COMMANDS, {"action": "ENROLL_CANCEL", "enroll_id": enroll_id}, "ENROLL_CANCEL")
+    except RuntimeError:
+        pass   # l'ESP32 quittera de lui-même à l'expiration
+    return row
+
+
 # --- Commandes superviseur --------------------------------------------------------------------------
 @router.post("/commands", status_code=202, tags=["commandes"], dependencies=operator)
 def send_command(command: Annotated[Command, Body(openapi_examples={
@@ -255,6 +334,28 @@ def control_airlock(action: AirlockAction):
     return {"id": cmd_id, "status": "sent", "command": cmd}
 
 
+@router.get("/actuators/state", tags=["actionneurs"], dependencies=viewer)
+def actuators_state():
+    """Dernières positions rapportées par l'ESP32 (bras, tête en degrés ; trappe en %). `age_s` = ancienneté de la mesure."""
+    at = bridge.actuators_at
+    return {**{k: bridge.actuators.get(k) for k in ("arm_left_deg", "arm_right_deg", "head_deg", "trap_pos_percent")},
+            "age_s": None if at is None else round(time.time() - at, 1)}
+
+
+@router.post("/actuators/move", status_code=202, tags=["actionneurs"], dependencies=operator)
+def move_actuator(action: MoveAction):
+    """Pilote un bras (0..180°), la tête (-90..90°) ou la trappe arrière. Exemple : {"target":"ARM_LEFT","command":"SET_ANGLE","angle":120}."""
+    try:
+        cmd = OperateMotor(action="OPERATE_MOTOR", **action.model_dump(exclude_none=True)).model_dump(exclude_none=True)
+    except ValidationError as exc:
+        raise HTTPException(422, [{"msg": e["msg"].removeprefix("Value error, ")} for e in exc.errors()]) from None
+    try:
+        cmd_id = bridge.publish(config.TOPIC_COMMANDS, cmd, "OPERATE_MOTOR")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return {"id": cmd_id, "status": "sent", "command": cmd}
+
+
 @router.post("/actuators/alarm", status_code=202, tags=["actionneurs"], dependencies=operator)
 def control_alarm(action: AlarmAction):
     """Déclenchement ou désactivation rapide de l'alarme (Buzzer + LED)."""
@@ -286,13 +387,59 @@ def emergency_stop():
 @router.post("/vision/snapshot", status_code=200, tags=["vision IA"], dependencies=operator)
 async def upload_snapshot(request: Request):
     """Reçoit la dernière image JPEG traitée par le script IA webcam et la garde en mémoire."""
-    global _latest_snapshot, _latest_snapshot_ts
+    global _latest_snapshot, _latest_snapshot_ts, _last_frame_seq, _unknown_now
     body = await request.body()          # taille déjà plafonnée par le middleware (413)
     if len(body) > MAX_SNAPSHOT_BYTES or not body.startswith(b"\xff\xd8\xff"):
         raise HTTPException(415, "image JPEG de 2 Mio maximum attendue")
+    seq = request.headers.get("x-frame-seq", "")
+    if seq.isdigit():                    # envois en parallèle (30 images/s) : l'ordre d'arrivée n'est pas garanti
+        if _latest_snapshot_ts is None or (datetime.now(timezone.utc) - _latest_snapshot_ts).total_seconds() > 5:
+            _last_frame_seq = 0          # plus rien depuis 5 s : nouvelle session d'envoi (pont redémarré), on repart de zéro
+        if int(seq) <= _last_frame_seq:
+            return {"status": "stale", "bytes": len(body)}
+        _last_frame_seq = int(seq)
     _latest_snapshot = body
     _latest_snapshot_ts = datetime.now(timezone.utc)
+    unknown = request.headers.get("x-vision-unknown", "")
+    _unknown_now = min(int(unknown), 99) if unknown.isdigit() else 0
+    _publish_frame(body)
     return {"status": "ok", "bytes": len(_latest_snapshot), "ts": _latest_snapshot_ts.isoformat()}
+
+
+@router.get("/vision/stream", tags=["vision IA"], dependencies=viewer)
+async def stream_video(request: Request):
+    """Flux vidéo en direct (MJPEG, multipart/x-mixed-replace) : une image JPEG par envoi de POST /vision/snapshot.
+    Authentification par l'en-tête Bearer : à lire avec fetch (une balise <img> ne peut pas l'envoyer)."""
+    if len(_viewers) >= MAX_VIEWERS:
+        raise HTTPException(503, "trop de spectateurs vidéo simultanés")
+    q: asyncio.Queue = asyncio.Queue(maxsize=2)
+    _viewers.add(q)
+
+    async def frames():
+        try:
+            yield b"\r\n"                                      # envoie les en-têtes tout de suite, même sans caméra
+            if _latest_snapshot is not None:
+                yield _mjpeg_part(_latest_snapshot)          # image immédiate à la connexion
+            while not await request.is_disconnected():
+                try:
+                    jpeg = await asyncio.wait_for(q.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    yield b"\r\n"                              # battement : garde la connexion ouverte à travers le proxy
+                    continue
+                yield _mjpeg_part(jpeg)
+        finally:
+            _viewers.discard(q)
+
+    return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@router.get("/vision/status", tags=["vision IA"], dependencies=viewer)
+def vision_status():
+    """État en direct de la caméra IA : `unknown` = personnes inconnues confirmées sur la dernière image (0 si le flux est coupé)."""
+    age = None if _latest_snapshot_ts is None else (datetime.now(timezone.utc) - _latest_snapshot_ts).total_seconds()
+    live = age is not None and age < 4
+    return {"live": live, "unknown": _unknown_now if live else 0, "age_s": None if age is None else round(age, 1)}
 
 
 @router.get("/vision/snapshot", tags=["vision IA"], dependencies=viewer)
